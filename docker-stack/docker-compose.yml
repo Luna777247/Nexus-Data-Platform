@@ -1,0 +1,285 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # 1. MESSAGE QUEUE - Kafka
+  # ============================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: nexus-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - nexus_network
+    healthcheck:
+      test: echo stat | nc localhost 2181
+      interval: 10s
+      timeout: 10s
+      retries: 3
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    networks:
+      - nexus_network
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092,EXTERNAL://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 24
+    healthcheck:
+      test: kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 2. OBJECT STORAGE - MinIO (S3-compatible)
+  # ============================================
+  minio:
+    image: minio/minio:latest
+    container_name: nexus-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - nexus_network
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: curl -f http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ============================================
+  # 3. SQL QUERY ENGINE - Trino
+  # ============================================
+  trino:
+    image: trinodb/trino:latest
+    container_name: nexus-trino
+    depends_on:
+      - minio
+    ports:
+      - "8081:8080"
+    networks:
+      - nexus_network
+    volumes:
+      - ./trino:/etc/trino/
+    environment:
+      TRINO_PASSWORD: admin123
+    healthcheck:
+      test: curl -f http://localhost:8080/ui/ || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 4. ANALYTICS DATABASE - ClickHouse
+  # ============================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: nexus-clickhouse
+    ports:
+      - "8123:8123"
+      - "9440:9000"
+    networks:
+      - nexus_network
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: admin123
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 5. SEARCH ENGINE - Elasticsearch
+  # ============================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: nexus-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - nexus_network
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    healthcheck:
+      test: curl -s http://localhost:9200 >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 6. CACHE LAYER - Redis
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - nexus_network
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass redis123
+    healthcheck:
+      test: redis-cli --raw incr ping
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 7. METADATA DATABASE - PostgreSQL
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: nexus-postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - nexus_network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: nexus_data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 8. ORCHESTRATION - Airflow (Webserver)
+  # ============================================
+  airflow-webserver:
+    image: apache/airflow:2.7.0-python3.11
+    container_name: nexus-airflow-webserver
+    depends_on:
+      - postgres
+    ports:
+      - "8888:8080"
+    networks:
+      - nexus_network
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+    environment:
+      AIRFLOW_UID: 50000
+      AIRFLOW_UID_GID: 50000
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql://admin:admin123@postgres:5432/nexus_data
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__WEBSERVER__SECRET_KEY: nexus_secret_key_2024
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    command: webserver
+    healthcheck:
+      test: curl -f http://localhost:8080/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 9. ORCHESTRATION - Airflow (Scheduler)
+  # ============================================
+  airflow-scheduler:
+    image: apache/airflow:2.7.0-python3.11
+    container_name: nexus-airflow-scheduler
+    depends_on:
+      - postgres
+      - airflow-webserver
+    networks:
+      - nexus_network
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+    environment:
+      AIRFLOW_UID: 50000
+      AIRFLOW_UID_GID: 50000
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql://admin:admin123@postgres:5432/nexus_data
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    command: scheduler
+    healthcheck:
+      test: airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 10. BI TOOL - Superset
+  # ============================================
+  superset:
+    image: apache/superset:latest
+    container_name: nexus-superset
+    depends_on:
+      - postgres
+    ports:
+      - "8088:8088"
+    networks:
+      - nexus_network
+    volumes:
+      - superset_data:/var/lib/superset
+    environment:
+      SUPERSET_SECRET_KEY: nexus_superset_secret_2024
+      SUPERSET_LOAD_EXAMPLES: "no"
+      DATABASE_URL: postgresql://admin:admin123@postgres:5432/superset
+    command: |
+      sh -c "superset db upgrade && 
+             superset fab create-admin 
+               --username admin 
+               --firstname Nexus 
+               --lastname Admin 
+               --email admin@nexus.io 
+               --password admin123 || true && 
+             superset load_examples || true && 
+             superset run -h 0.0.0.0 -p 8088"
+    healthcheck:
+      test: curl -f http://localhost:8088/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  nexus_network:
+    driver: bridge
+
+volumes:
+  minio_data:
+  clickhouse_data:
+  elasticsearch_data:
+  redis_data:
+  postgres_data:
+  superset_data:

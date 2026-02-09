@@ -1,0 +1,5 @@
+{
+  "name": "Nexus Data Platform",
+  "description": "A comprehensive end-to-end ETL and Analytics platform visualizer that simulates data ingestion from multiple APIs, processing in a Data Lake, and storage in a Data Warehouse with an interactive AI-powered dashboard.",
+  "requestFramePermissions": []
+}
