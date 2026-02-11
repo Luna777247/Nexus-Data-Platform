@@ -1,0 +1,844 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexus-data-platform
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-config
+  namespace: nexus-data-platform
+data:
+  config.properties: |
+    coordinator=true
+    node-scheduler.include-coordinator=true
+    http-server.http.port=8080
+    query.max-memory=2GB
+    query.max-memory-per-node=1GB
+    discovery-server.enabled=true
+    discovery.uri=http://trino:8080
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-catalog
+  namespace: nexus-data-platform
+data:
+  minio.properties: |
+    connector.name=minio
+    minio.endpoint=http://minio:9000
+    minio.access-key=minioadmin
+    minio.secret-key=minioadmin123
+    minio.use-path-style-access=true
+    hive.metastore.type=none
+  postgresql.properties: |
+    connector.name=postgresql
+    connection-url=jdbc:postgresql://postgres:5432/nexus_data
+    connection-user=admin
+    connection-password=admin123
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-init
+  namespace: nexus-data-platform
+data:
+  init.sql: |
+    CREATE DATABASE IF NOT EXISTS analytics;
+    CREATE TABLE IF NOT EXISTS analytics.events (
+        timestamp DateTime,
+        user_id UInt32,
+        event_type String,
+        amount Float64,
+        region String,
+        source String,
+        created_at DateTime DEFAULT now()
+    ) ENGINE = MergeTree()
+    ORDER BY (timestamp, user_id)
+    PARTITION BY toYYYYMM(timestamp);
+    CREATE TABLE IF NOT EXISTS analytics.tour_recommendations (
+        recommendation_id UUID,
+        user_id UInt32,
+        tour_id String,
+        match_score Float64,
+        predicted_rating Float64,
+        region String,
+        created_at DateTime DEFAULT now()
+    ) ENGINE = MergeTree()
+    ORDER BY (user_id, recommendation_id)
+    PARTITION BY toYYYYMM(created_at);
+    CREATE TABLE IF NOT EXISTS analytics.regional_metrics (
+        metric_date Date,
+        region String,
+        total_bookings UInt64,
+        total_revenue Float64,
+        avg_booking_value Float64,
+        unique_users UInt32,
+        anomaly_flag UInt8,
+        created_at DateTime DEFAULT now()
+    ) ENGINE = MergeTree()
+    ORDER BY (metric_date, region)
+    PARTITION BY toYYYYMM(metric_date);
+    CREATE VIEW IF NOT EXISTS analytics.daily_event_summary AS
+    SELECT
+        toDate(timestamp) as event_date,
+        region,
+        event_type,
+        count(*) as event_count,
+        sum(amount) as total_amount,
+        avg(amount) as avg_amount,
+        max(amount) as max_amount
+    FROM analytics.events
+    GROUP BY event_date, region, event_type;
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-dags
+  namespace: nexus-data-platform
+data:
+  tourism_events_pipeline.py: |
+  from airflow import DAG
+  from airflow.operators.bash import BashOperator
+  from airflow.utils.dates import days_ago
+
+  dag = DAG(
+    "tourism_events_pipeline",
+    schedule_interval="@daily",
+    start_date=days_ago(1),
+    catchup=False,
+    tags=["ingestion", "tourism", "events"],
+  )
+
+  task_noop = BashOperator(
+    task_id="noop",
+    bash_command="echo pipeline ok",
+    dag=dag,
+  )
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shared-event-schema
+  namespace: nexus-data-platform
+data:
+  event.schema.json: |
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TourismEvent",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "user_id": { "type": "integer" },
+        "event_type": { "type": "string" },
+        "amount": { "type": "number" },
+        "region": { "type": "string" },
+        "source": { "type": "string" }
+      },
+      "required": ["id", "user_id", "event_type", "amount", "region", "source"]
+    }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: nexus-data-platform
+spec:
+  serviceName: zookeeper
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+        - name: zookeeper
+          image: confluentinc/cp-zookeeper:7.5.0
+          ports:
+            - containerPort: 2181
+          env:
+            - name: ZOOKEEPER_CLIENT_PORT
+              value: "2181"
+            - name: ZOOKEEPER_TICK_TIME
+              value: "2000"
+          volumeMounts:
+            - name: zookeeper-data
+              mountPath: /var/lib/zookeeper
+  volumeClaimTemplates:
+    - metadata:
+        name: zookeeper-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: zookeeper
+  ports:
+    - name: client
+      port: 2181
+      targetPort: 2181
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: nexus-data-platform
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+        - name: kafka
+          image: confluentinc/cp-kafka:7.5.0
+          ports:
+            - containerPort: 9092
+          env:
+            - name: KAFKA_BROKER_ID
+              value: "1"
+            - name: KAFKA_ZOOKEEPER_CONNECT
+              value: "zookeeper:2181"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:19092"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:30092"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "true"
+            - name: KAFKA_LOG_RETENTION_HOURS
+              value: "24"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-external
+  namespace: nexus-data-platform
+spec:
+  type: NodePort
+  selector:
+    app: kafka
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 9092
+      nodePort: 30092
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: nexus-data-platform
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              value: "minioadmin"
+            - name: MINIO_ROOT_PASSWORD
+              value: "minioadmin123"
+          volumeMounts:
+            - name: minio-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: minio-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino
+  namespace: nexus-data-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trino
+  template:
+    metadata:
+      labels:
+        app: trino
+    spec:
+      containers:
+        - name: trino
+          image: trinodb/trino:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TRINO_PASSWORD
+              value: "admin123"
+          volumeMounts:
+            - name: trino-config
+              mountPath: /etc/trino/config.properties
+              subPath: config.properties
+            - name: trino-catalog
+              mountPath: /etc/trino/catalog/minio.properties
+              subPath: minio.properties
+            - name: trino-catalog
+              mountPath: /etc/trino/catalog/postgresql.properties
+              subPath: postgresql.properties
+      volumes:
+        - name: trino-config
+          configMap:
+            name: trino-config
+        - name: trino-catalog
+          configMap:
+            name: trino-catalog
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: trino
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  namespace: nexus-data-platform
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:latest
+          ports:
+            - containerPort: 8123
+            - containerPort: 9000
+          env:
+            - name: CLICKHOUSE_DB
+              value: "default"
+            - name: CLICKHOUSE_USER
+              value: "admin"
+            - name: CLICKHOUSE_PASSWORD
+              value: "admin123"
+          volumeMounts:
+            - name: clickhouse-data
+              mountPath: /var/lib/clickhouse
+            - name: clickhouse-init
+              mountPath: /docker-entrypoint-initdb.d/init.sql
+              subPath: init.sql
+      volumes:
+        - name: clickhouse-init
+          configMap:
+            name: clickhouse-init
+  volumeClaimTemplates:
+    - metadata:
+        name: clickhouse-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: clickhouse
+  ports:
+    - name: http
+      port: 8123
+      targetPort: 8123
+    - name: native
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  namespace: nexus-data-platform
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+          ports:
+            - containerPort: 9200
+            - containerPort: 9300
+          env:
+            - name: discovery.type
+              value: "single-node"
+            - name: xpack.security.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          volumeMounts:
+            - name: elasticsearch-data
+              mountPath: /usr/share/elasticsearch/data
+  volumeClaimTemplates:
+    - metadata:
+        name: elasticsearch-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+    - name: transport
+      port: 9300
+      targetPort: 9300
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: nexus-data-platform
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          args: ["--appendonly", "yes", "--requirepass", "redis123"]
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: nexus-data-platform
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "admin"
+            - name: POSTGRES_PASSWORD
+              value: "admin123"
+            - name: POSTGRES_DB
+              value: "nexus_data"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-webserver
+  namespace: nexus-data-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-webserver
+  template:
+    metadata:
+      labels:
+        app: airflow-webserver
+    spec:
+      containers:
+        - name: airflow-webserver
+          image: apache/airflow:2.7.0-python3.11
+          ports:
+            - containerPort: 8080
+          env:
+            - name: AIRFLOW_UID
+              value: "50000"
+            - name: AIRFLOW_UID_GID
+              value: "50000"
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "postgresql://admin:admin123@postgres:5432/nexus_data"
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: "LocalExecutor"
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "false"
+            - name: AIRFLOW__CORE__DAGS_FOLDER
+              value: "/opt/airflow/dags"
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              value: "nexus_secret_key_2024"
+            - name: AIRFLOW__WEBSERVER__EXPOSE_CONFIG
+              value: "true"
+          command: ["airflow", "webserver"]
+          volumeMounts:
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags
+            - name: shared-schema
+              mountPath: /opt/packages/shared/schemas/event.schema.json
+              subPath: event.schema.json
+      volumes:
+        - name: airflow-dags
+          configMap:
+            name: airflow-dags
+        - name: shared-schema
+          configMap:
+            name: shared-event-schema
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: airflow-webserver
+  ports:
+    - name: http
+      port: 8888
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: nexus-data-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow-scheduler
+    spec:
+      containers:
+        - name: airflow-scheduler
+          image: apache/airflow:2.7.0-python3.11
+          env:
+            - name: AIRFLOW_UID
+              value: "50000"
+            - name: AIRFLOW_UID_GID
+              value: "50000"
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "postgresql://admin:admin123@postgres:5432/nexus_data"
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: "LocalExecutor"
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "false"
+            - name: AIRFLOW__CORE__DAGS_FOLDER
+              value: "/opt/airflow/dags"
+          command: ["airflow", "scheduler"]
+          volumeMounts:
+            - name: airflow-dags
+              mountPath: /opt/airflow/dags
+            - name: shared-schema
+              mountPath: /opt/packages/shared/schemas/event.schema.json
+              subPath: event.schema.json
+      volumes:
+        - name: airflow-dags
+          configMap:
+            name: airflow-dags
+        - name: shared-schema
+          configMap:
+            name: shared-event-schema
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: superset
+  namespace: nexus-data-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: superset
+  template:
+    metadata:
+      labels:
+        app: superset
+    spec:
+      containers:
+        - name: superset
+          image: apache/superset:latest
+          ports:
+            - containerPort: 8088
+          env:
+            - name: SUPERSET_SECRET_KEY
+              value: "nexus_superset_secret_2024"
+            - name: SUPERSET_LOAD_EXAMPLES
+              value: "no"
+            - name: DATABASE_URL
+              value: "postgresql://admin:admin123@postgres:5432/superset"
+          command:
+            - sh
+            - -c
+            - |
+              superset db upgrade &&
+              superset fab create-admin
+                --username admin
+                --firstname Nexus
+                --lastname Admin
+                --email admin@nexus.io
+                --password admin123 || true &&
+              superset load_examples || true &&
+              superset run -h 0.0.0.0 -p 8088
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: superset
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: superset
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: nexus-data-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: nexus-api:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              value: "redis123"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: nexus-data-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: nexus-frontend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 80

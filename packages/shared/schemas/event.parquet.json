@@ -1,0 +1,13 @@
+{
+  "name": "tourism_events",
+  "columns": [
+    { "name": "id", "type": "string" },
+    { "name": "user_id", "type": "int32" },
+    { "name": "event_type", "type": "string" },
+    { "name": "amount", "type": "double" },
+    { "name": "region", "type": "string" },
+    { "name": "source", "type": "string" },
+    { "name": "event_date", "type": "timestamp" },
+    { "name": "processed_at", "type": "timestamp" }
+  ]
+}

@@ -23,7 +23,7 @@ fi
 echo ""
 
 echo "3. Docker Services:"
-docker-compose -f /workspaces/Nexus-Data-Platform/docker-stack/docker-compose.yml ps --format "table {{.Service}}\t{{.Status}}" 2>/dev/null | grep -E "(Service|airflow|postgres|clickhouse|minio|redis)" | head -10
+docker-compose -f /workspaces/Nexus-Data-Platform/infra/docker-stack/docker-compose.yml ps --format "table {{.Service}}\t{{.Status}}" 2>/dev/null | grep -E "(Service|airflow|postgres|clickhouse|minio|redis)" | head -10
 echo ""
 
 echo "✅ Platform Status Check Complete!"

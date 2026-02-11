@@ -1,0 +1,13 @@
+{
+  "type": "record",
+  "name": "TourismEvent",
+  "namespace": "nexus.data",
+  "fields": [
+    { "name": "id", "type": "string" },
+    { "name": "user_id", "type": "int" },
+    { "name": "event_type", "type": "string" },
+    { "name": "amount", "type": "double" },
+    { "name": "region", "type": "string" },
+    { "name": "source", "type": "string" }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TourismEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "user_id": { "type": "integer" },
+    "event_type": { "type": "string" },
+    "amount": { "type": "number" },
+    "region": { "type": "string" },
+    "source": { "type": "string" }
+  },
+  "required": ["id", "user_id", "event_type", "amount", "region", "source"]
+}

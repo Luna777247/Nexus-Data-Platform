@@ -3,7 +3,7 @@
 **Complete end-to-end data platform for tourism industry with real-time data ingestion, processing, and analytics**
 
 [![Data Pipeline](https://img.shields.io/badge/Status-Production_Ready-brightgreen)]()
-[![Platform](https://img.shields.io/badge/Platform-Docker-blue)]()
+[![Platform](https://img.shields.io/badge/Platform-Docker%20%7C%20Kubernetes-blue)]()
 
 ---
 
@@ -25,9 +25,20 @@
 ### Deploy Complete Stack (5 minutes)
 
 ```bash
-cd docker-stack
+cd infra/docker-stack
 docker-compose up -d
 ./health-check.sh
+```
+
+### Deploy on Kubernetes (local)
+
+```bash
+docker build -t nexus-api:local -f apps/api/Dockerfile .
+docker build -t nexus-frontend:local \
+   --build-arg VITE_API_URL=http://localhost:8000 \
+   -f apps/frontend/Dockerfile .
+kubectl apply -f k8s/stack.yaml
+kubectl -n nexus-data-platform get pods
 ```
 
 ### Access Services
@@ -47,11 +58,8 @@ Full setup guide: **[SETUP_COMPLETE.md](./SETUP_COMPLETE.md)**
 
 | Guide | Description |
 |-------|-------------|
-| **[SETUP_COMPLETE.md](./SETUP_COMPLETE.md)** | Complete setup & commands |
-| **[DATA_PLATFORM_STACK.md](./DATA_PLATFORM_STACK.md)** | Architecture & tech stack |
-| **[IMPLEMENTATION_GUIDE.md](./IMPLEMENTATION_GUIDE.md)** | Step-by-step with code |
-| **[TECHNOLOGY_COMPARISON.md](./TECHNOLOGY_COMPARISON.md)** | Tech choices explained |
-| **[QUICK_REFERENCE.md](./QUICK_REFERENCE.md)** | Quick commands reference |
+| **[DOCS.md](./DOCS.md)** | 📖 Complete technical documentation |
+| **[k8s/README.md](./k8s/README.md)** | ☸️ Kubernetes manifests & local guide |
 
 ---
 
@@ -90,12 +98,12 @@ curl http://localhost:8000/api/v1/tours?region=VN
 
 ```
 nexus-data-platform/
-├── docker-stack/         # Infrastructure (10 Docker services)
-├── airflow/dags/         # Workflow orchestration  
-├── spark/                # Data processing jobs
-├── api/                  # FastAPI serving layer
-├── components/           # React UI components
-└── services/             # Business logic
+├── apps/frontend/        # React UI application
+├── apps/api/             # FastAPI serving layer
+├── pipelines/airflow/    # Workflow orchestration
+├── jobs/spark/           # Data processing jobs
+├── infra/docker-stack/   # Infrastructure (10 Docker services)
+└── packages/shared/      # Shared contracts, types, utilities
 ```
 
 ---
@@ -117,13 +125,13 @@ See full architecture: **[DATA_PLATFORM_STACK.md](./DATA_PLATFORM_STACK.md)**
 **Frontend:**
 ```bash
 npm install
-npm run dev  # http://localhost:5173
+npm run frontend:dev  # http://localhost:5173
 ```
 
 **Backend API:**
 ```bash
-pip install -r api/requirements.txt
-python api/main.py  # http://localhost:8000
+pip install -r apps/api/requirements.txt
+python apps/api/main.py  # http://localhost:8000
 ```
 
 ---
