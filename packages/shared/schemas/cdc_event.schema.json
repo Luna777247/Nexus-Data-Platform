@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus-data-platform.io/schemas/cdc_event.schema.json",
+  "title": "CDC Event Schema",
+  "description": "Schema for Change Data Capture events from OLTP databases",
+  "type": "object",
+  "required": [
+    "source",
+    "payload"
+  ],
+  "properties": {
+    "schema": {
+      "type": "object",
+      "description": "Schema definition for the CDC event"
+    },
+    "payload": {
+      "type": "object",
+      "required": ["op", "source", "ts_ms"],
+      "properties": {
+        "before": {
+          "type": ["object", "null"],
+          "description": "Record state before change (null for INSERT)"
+        },
+        "after": {
+          "type": ["object", "null"],
+          "description": "Record state after change (null for DELETE)"
+        },
+        "source": {
+          "type": "object",
+          "required": ["connector", "db", "table", "ts_ms"],
+          "properties": {
+            "version": {
+              "type": "string",
+              "description": "Debezium connector version"
+            },
+            "connector": {
+              "type": "string",
+              "enum": ["postgresql", "mysql", "mongodb"],
+              "description": "Database connector type"
+            },
+            "name": {
+              "type": "string",
+              "description": "Connector name"
+            },
+            "ts_ms": {
+              "type": "integer",
+              "description": "Source timestamp in milliseconds since epoch"
+            },
+            "db": {
+              "type": "string",
+              "description": "Database name"
+            },
+            "schema": {
+              "type": "string",
+              "description": "Schema name (PostgreSQL)"
+            },
+            "table": {
+              "type": "string",
+              "description": "Table name"
+            },
+            "snapshot": {
+              "type": ["boolean", "string"],
+              "description": "Whether this is a snapshot record"
+            }
+          }
+        },
+        "op": {
+          "type": "string",
+          "enum": ["c", "r", "u", "d"],
+          "description": "Operation: c=create, r=read, u=update, d=delete"
+        },
+        "ts_ms": {
+          "type": "integer",
+          "description": "Processing timestamp in milliseconds since epoch"
+        },
+        "transaction": {
+          "type": "object",
+          "description": "Transaction metadata"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "description": "Source information",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "connector": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

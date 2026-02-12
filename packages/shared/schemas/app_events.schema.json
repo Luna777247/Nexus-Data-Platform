@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus-data-platform.io/schemas/app_events.schema.json",
+  "title": "Application Events Schema",
+  "description": "Schema for mobile/web app user events",
+  "type": "object",
+  "required": [
+    "event_id",
+    "user_id",
+    "session_id",
+    "event_type",
+    "timestamp",
+    "device",
+    "location"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "Unique event identifier",
+      "pattern": "^evt_[a-zA-Z0-9]{10,}$"
+    },
+    "user_id": {
+      "type": "integer",
+      "description": "User identifier",
+      "minimum": 1
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Session identifier",
+      "pattern": "^sess_[a-zA-Z0-9]{10,}$"
+    },
+    "event_type": {
+      "type": "string",
+      "description": "Type of event",
+      "enum": ["click", "view", "search", "booking", "rating", "navigation"]
+    },
+    "action": {
+      "type": "string",
+      "description": "Specific action taken"
+    },
+    "tour_id": {
+      "type": "string",
+      "description": "Tour identifier if applicable"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Event timestamp in ISO 8601 format"
+    },
+    "device": {
+      "type": "object",
+      "required": ["type", "os"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["mobile", "tablet", "desktop"]
+        },
+        "os": {
+          "type": "string",
+          "enum": ["iOS", "Android", "Windows", "MacOS", "Linux"]
+        },
+        "version": {
+          "type": "string"
+        },
+        "browser": {
+          "type": "string"
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "required": ["country"],
+      "properties": {
+        "country": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "city": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string"
+        },
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "referrer": {
+          "type": "string"
+        },
+        "campaign": {
+          "type": "string"
+        },
+        "utm_source": {
+          "type": "string"
+        },
+        "utm_medium": {
+          "type": "string"
+        },
+        "utm_campaign": {
+          "type": "string"
+        }
+      }
+    },
+    "amount": {
+      "type": "number",
+      "description": "Transaction amount if applicable",
+      "minimum": 0
+    }
+  }
+}

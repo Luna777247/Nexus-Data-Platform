@@ -1,0 +1,132 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus-data-platform.io/schemas/clickstream.schema.json",
+  "title": "Clickstream Event Schema",
+  "description": "Schema for clickstream and web analytics events",
+  "type": "object",
+  "required": [
+    "anonymous_id",
+    "event",
+    "timestamp",
+    "context"
+  ],
+  "properties": {
+    "anonymous_id": {
+      "type": "string",
+      "description": "Anonymous user identifier",
+      "pattern": "^anon_[a-zA-Z0-9]{10,}$"
+    },
+    "user_id": {
+      "type": ["integer", "null"],
+      "description": "Authenticated user ID (null if anonymous)"
+    },
+    "event": {
+      "type": "string",
+      "description": "Event name",
+      "examples": ["Page Viewed", "Link Clicked", "Form Submitted"]
+    },
+    "properties": {
+      "type": "object",
+      "description": "Event-specific properties",
+      "properties": {
+        "page": {
+          "type": "string",
+          "description": "Page path"
+        },
+        "title": {
+          "type": "string",
+          "description": "Page title"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Full URL"
+        },
+        "path": {
+          "type": "string",
+          "description": "URL path"
+        },
+        "referrer": {
+          "type": "string",
+          "description": "Referrer URL"
+        },
+        "search": {
+          "type": "string",
+          "description": "Search query parameters"
+        },
+        "duration": {
+          "type": "number",
+          "description": "Page view duration in seconds",
+          "minimum": 0
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "required": ["ip", "user_agent"],
+      "properties": {
+        "ip": {
+          "type": "string",
+          "format": "ipv4",
+          "description": "User IP address"
+        },
+        "user_agent": {
+          "type": "string",
+          "description": "Browser user agent string"
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^[a-z]{2}-[A-Z]{2}$",
+          "description": "Locale (e.g., en-US, vi-VN)"
+        },
+        "timezone": {
+          "type": "string",
+          "description": "User timezone"
+        },
+        "screen": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "campaign": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "medium": {
+              "type": "string"
+            },
+            "term": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Event timestamp (ISO 8601)"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Server receive timestamp (ISO 8601)"
+    }
+  }
+}

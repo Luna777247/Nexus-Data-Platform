@@ -1,0 +1,114 @@
+sequenceDiagram
+    participant MobileApp as 📱 Mobile App
+    participant WebApp as 🌐 Web App
+    participant API as FastAPI Gateway
+    participant Kafka as Kafka Cluster
+    participant DLQ as DLQ Topics
+    participant CDC as Debezium CDC
+    participant OLTP as OLTP Databases
+    participant ExtAPI as External APIs
+    participant Airflow as Airflow
+    participant SparkStream as Spark Streaming Cluster
+    participant Bronze as 🥉 Bronze Layer
+    participant Iceberg as Iceberg Catalog
+    participant SparkBatch as Spark Batch Cluster
+    participant Quality as Data Quality
+    participant Lineage as Data Lineage
+    participant Silver as 🥈 Silver Layer
+    participant Gold as 🥇 Gold Layer
+    participant ClickHouse as ClickHouse
+    participant Prometheus as Prometheus
+    participant Grafana as Grafana
+    
+    Note over MobileApp,WebApp: 1️⃣ Application Data Flow
+    MobileApp->>API: User clicks "Search Seoul tour"
+    WebApp->>API: User views tour details
+    API->>Lineage: Track API request
+    API->>Kafka: Publish to topic_app_events
+    Note right of API: Event: {<br/>  user_id: 12345,<br/>  action: "click",<br/>  tour_id: "seoul-001",<br/>  timestamp: "2026-02-12T10:30:00Z"<br/>}
+    API->>Prometheus: Emit metrics (request_count, latency)
+    
+    Note over OLTP,CDC: 2️⃣ OLTP Database CDC Flow
+    OLTP->>OLTP: INSERT INTO bookings<br/>(user_id, tour_id, amount, status)
+    OLTP->>CDC: Database binlog change
+    CDC->>Lineage: Track CDC source
+    CDC->>Kafka: Publish to topic_cdc_changes
+    Note right of CDC: CDC Event: {<br/>  op: "INSERT",<br/>  table: "bookings",<br/>  data: {...},<br/>  timestamp: "2026-02-12T10:31:00Z"<br/>}
+    
+    Note over WebApp,Kafka: 3️⃣ Streaming Data Flow
+    WebApp->>Kafka: Clickstream events
+    MobileApp->>Kafka: App logs, errors
+    Note right of Kafka: topic_clickstream<br/>topic_app_logs
+    
+    Note over ExtAPI,Airflow: 4️⃣ External Data Flow (Batch)
+    Airflow->>Airflow: Schedule: @daily
+    Airflow->>Lineage: Track job start
+    Airflow->>ExtAPI: GET /weather/Seoul
+    ExtAPI-->>Airflow: Weather data (JSON)
+    Airflow->>Quality: Validate external data
+    Quality-->>Airflow: ✓ Schema valid
+    Airflow->>Kafka: Publish to topic_external_data
+    Airflow->>Prometheus: Emit metrics (job_duration, record_count)
+    
+    Note over Kafka,Bronze: 5️⃣ Real-time Ingestion (Streaming Cluster)
+    Kafka->>SparkStream: Consume all topics
+    SparkStream->>Quality: Validate schema
+    Quality-->>SparkStream: ✓ Valid / ✗ Invalid
+    alt Schema Invalid
+        SparkStream->>DLQ: Send to dlq_schema_validation_errors
+    else Schema Valid
+        SparkStream->>SparkStream: Add ingestion_time<br/>Partition by date
+        SparkStream->>Lineage: Track ingestion
+        SparkStream->>Bronze: Write Parquet files
+        SparkStream->>Iceberg: Register table metadata
+        Note right of Bronze: bronze/app_events/date=2026-02-12/<br/>bronze/cdc_changes/date=2026-02-12/<br/>bronze/clickstream/date=2026-02-12/<br/>bronze/external_data/date=2026-02-12/
+    end
+    SparkStream->>Prometheus: Emit metrics (kafka_lag, throughput)
+    
+    Note over Bronze,Silver: 6️⃣ Data Cleaning & Validation (Batch Cluster)
+    Airflow->>SparkBatch: Trigger ETL job (hourly)
+    Airflow->>Lineage: Track job lineage
+    SparkBatch->>Iceberg: Query Bronze via catalog
+    Iceberg-->>SparkBatch: Table metadata
+    SparkBatch->>Bronze: Read raw events
+    SparkBatch->>Quality: Run data quality checks
+    Quality->>Quality: - Remove duplicates<br/>- Validate ranges<br/>- Check nulls<br/>- Validate schema
+    Quality-->>SparkBatch: Quality report
+    alt Quality Failed
+        SparkBatch->>DLQ: Send to dlq_processing_errors
+    else Quality Passed
+        SparkBatch->>SparkBatch: - Enrich with dimensions<br/>- Join user profiles<br/>- Apply business rules
+        SparkBatch->>Silver: Write cleaned data
+        SparkBatch->>Iceberg: Update Silver metadata
+        SparkBatch->>Lineage: Track transformations
+        Note right of Silver: silver/users_cleaned/<br/>silver/bookings_validated/<br/>silver/clicks_enriched/<br/>silver/weather_normalized/
+    end
+    SparkBatch->>Prometheus: Emit metrics (rows_processed, quality_score)
+    
+    Note over Silver,Gold: 7️⃣ Aggregation & Feature Engineering
+    SparkBatch->>Iceberg: Query Silver via catalog
+    Iceberg-->>SparkBatch: Table metadata
+    SparkBatch->>Silver: Read validated data
+    SparkBatch->>Quality: Validate business rules
+    Quality-->>SparkBatch: ✓ Rules valid
+    SparkBatch->>SparkBatch: Aggregations:<br/>- User 360 view<br/>- Booking metrics<br/>- Recommendation features<br/>- Tourism analytics
+    SparkBatch->>Gold: Write business tables
+    SparkBatch->>Iceberg: Update Gold metadata
+    SparkBatch->>Lineage: Track transformations
+    Note right of Gold: gold/user_360_view/<br/>gold/booking_metrics/<br/>gold/recommendation_features/<br/>gold/tourism_analytics/
+    SparkBatch->>Prometheus: Emit metrics (aggregation_count)
+    
+    Note over Gold,ClickHouse: 8️⃣ Analytics Serving
+    Gold->>ClickHouse: Load aggregated data
+    ClickHouse->>ClickHouse: Create materialized views<br/>Optimize for OLAP queries
+    ClickHouse->>Prometheus: Emit metrics (query_latency)
+    
+    Note over API,Grafana: 9️⃣ Monitoring & Observability
+    Prometheus->>Prometheus: Scrape all metrics:
+    Note right of Prometheus: - API latency<br/>- Kafka lag<br/>- Spark throughput<br/>- Data quality scores<br/>- Job durations
+    Prometheus->>Grafana: Feed metrics
+    Grafana->>Grafana: Display dashboards:
+    Note right of Grafana: - Platform Overview<br/>- Data Quality<br/>- Pipeline SLA<br/>- Resource Usage
+    
+    Note over MobileApp,Grafana: 🎯 End-to-End Characteristics
+    Note left of MobileApp: ⏱️ Latency:<br/>- Real-time: <5 minutes<br/>- Batch: 1-24 hours<br/><br/>🔐 Governance:<br/>- Data Quality: Great Expectations<br/>- Lineage: OpenMetadata<br/>- Access Control: RBAC<br/><br/>📊 Observability:<br/>- Metrics: Prometheus<br/>- Dashboards: Grafana<br/>- Error Recovery: DLQ

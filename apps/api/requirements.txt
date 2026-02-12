@@ -18,6 +18,11 @@ minio==7.2.0
 # Message Queue
 kafka-python==2.0.2
 
+# Schema Registry & DLQ (HA Features)
+confluent-kafka[avro]==2.3.0
+avro-python3==1.10.2
+fastavro==1.9.4
+
 # GraphQL
 strawberry-graphql==0.219.0
 

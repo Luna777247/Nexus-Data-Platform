@@ -253,7 +253,7 @@ services:
       S3_REGION: us-east-1
       S3_PATH_STYLE: "true"
       EVENT_SCHEMA_PATH: /opt/airflow/packages/shared/schemas/event.schema.json
-      CONFIG_SOURCES_PATH: /opt/airflow/conf/sources.yaml
+      CONFIG_SOURCES_PATH: /opt/airflow/configs/sources.yaml
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       DATA_SOURCES_DB_HOST: postgres
       DATA_SOURCES_DB_PORT: "5432"
@@ -307,7 +307,7 @@ services:
       S3_REGION: us-east-1
       S3_PATH_STYLE: "true"
       EVENT_SCHEMA_PATH: /opt/airflow/packages/shared/schemas/event.schema.json
-      CONFIG_SOURCES_PATH: /opt/airflow/conf/sources.yaml
+      CONFIG_SOURCES_PATH: /opt/airflow/configs/sources.yaml
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       DATA_SOURCES_DB_HOST: postgres
       DATA_SOURCES_DB_PORT: "5432"

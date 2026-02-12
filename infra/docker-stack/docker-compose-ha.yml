@@ -1,0 +1,791 @@
+version: '3.8'
+
+# ═══════════════════════════════════════════════════════════════
+# Nexus Data Platform - High Availability Configuration
+# ═══════════════════════════════════════════════════════════════
+#
+# This configuration addresses critical production requirements:
+# ✅ Kafka 3-broker cluster with replication
+# ✅ PostgreSQL streaming replication (1 primary + 2 replicas)
+# ✅ MinIO distributed mode (4 nodes)
+# ✅ Schema Registry for schema management
+# ✅ Prometheus + Grafana monitoring
+# ✅ HashiCorp Vault for secrets management
+# ✅ Kafka DLQ topics configured
+#
+# Usage: docker-compose -f docker-compose-ha.yml up -d
+#
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ============================================
+  # SECRETS MANAGEMENT - HashiCorp Vault
+  # ============================================
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: nexus-vault
+    ports:
+      - "8200:8200"
+    networks:
+      - nexus_network
+    volumes:
+      - vault_data:/vault/data
+      - ./vault/config.hcl:/vault/config/config.hcl
+    environment:
+      VAULT_ADDR: http://0.0.0.0:8200
+      VAULT_API_ADDR: http://0.0.0.0:8200
+    command: server
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # MESSAGE QUEUE - ZooKeeper Ensemble (3 nodes)
+  # ============================================
+  zookeeper-1:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: nexus-zookeeper-1
+    environment:
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+    ports:
+      - "2181:2181"
+    networks:
+      - nexus_network
+    volumes:
+      - zookeeper_1_data:/var/lib/zookeeper/data
+      - zookeeper_1_logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: echo stat | nc localhost 2181
+      interval: 10s
+      timeout: 10s
+      retries: 3
+
+  zookeeper-2:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: nexus-zookeeper-2
+    environment:
+      ZOOKEEPER_SERVER_ID: 2
+      ZOOKEEPER_CLIENT_PORT: 2182
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+    ports:
+      - "2182:2182"
+    networks:
+      - nexus_network
+    volumes:
+      - zookeeper_2_data:/var/lib/zookeeper/data
+      - zookeeper_2_logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: echo stat | nc localhost 2182
+      interval: 10s
+      timeout: 10s
+      retries: 3
+
+  zookeeper-3:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: nexus-zookeeper-3
+    environment:
+      ZOOKEEPER_SERVER_ID: 3
+      ZOOKEEPER_CLIENT_PORT: 2183
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+    ports:
+      - "2183:2183"
+    networks:
+      - nexus_network
+    volumes:
+      - zookeeper_3_data:/var/lib/zookeeper/data
+      - zookeeper_3_logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: echo stat | nc localhost 2183
+      interval: 10s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # MESSAGE QUEUE - Kafka Cluster (3 brokers)
+  # ============================================
+  kafka-1:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-1
+    depends_on:
+      - zookeeper-1
+      - zookeeper-2
+      - zookeeper-3
+    ports:
+      - "9092:9092"
+    networks:
+      - nexus_network
+    volumes:
+      - kafka_1_data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2182,zookeeper-3:2183
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168  # 7 days (was 24)
+      KAFKA_LOG_RETENTION_BYTES: 1073741824  # 1GB per partition
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+    healthcheck:
+      test: kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-2
+    depends_on:
+      - zookeeper-1
+      - zookeeper-2
+      - zookeeper-3
+    ports:
+      - "9093:9093"
+    networks:
+      - nexus_network
+    volumes:
+      - kafka_2_data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2182,zookeeper-3:2183
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29093,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+    healthcheck:
+      test: kafka-broker-api-versions.sh --bootstrap-server localhost:9093 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-3
+    depends_on:
+      - zookeeper-1
+      - zookeeper-2
+      - zookeeper-3
+    ports:
+      - "9094:9094"
+    networks:
+      - nexus_network
+    volumes:
+      - kafka_3_data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2182,zookeeper-3:2183
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29094,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+    healthcheck:
+      test: kafka-broker-api-versions.sh --bootstrap-server localhost:9094 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # SCHEMA REGISTRY - Confluent Schema Registry
+  # ============================================
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    container_name: nexus-schema-registry
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    ports:
+      - "8081:8081"
+    networks:
+      - nexus_network
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29093,kafka-3:29094
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 3
+    healthcheck:
+      test: curl -f http://localhost:8081/subjects || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # KAFKA INIT - Create DLQ Topics
+  # ============================================
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-init
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    networks:
+      - nexus_network
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Waiting for Kafka cluster to be ready..."
+        sleep 30
+        
+        echo "Creating DLQ topics..."
+        kafka-topics.sh --bootstrap-server kafka-1:29092 \
+          --create --if-not-exists \
+          --topic dlq_failed_messages \
+          --partitions 6 \
+          --replication-factor 3 \
+          --config retention.ms=2592000000
+        
+        kafka-topics.sh --bootstrap-server kafka-1:29092 \
+          --create --if-not-exists \
+          --topic dlq_schema_validation_errors \
+          --partitions 3 \
+          --replication-factor 3 \
+          --config retention.ms=2592000000
+        
+        kafka-topics.sh --bootstrap-server kafka-1:29092 \
+          --create --if-not-exists \
+          --topic dlq_processing_errors \
+          --partitions 3 \
+          --replication-factor 3 \
+          --config retention.ms=2592000000
+        
+        echo "✅ DLQ topics created successfully"
+        
+        echo "Listing all topics:"
+        kafka-topics.sh --bootstrap-server kafka-1:29092 --list
+
+  # ============================================
+  # POSTGRESQL - Primary (with replication setup)
+  # ============================================
+  postgres-primary:
+    image: bitnami/postgresql-repmgr:15
+    container_name: nexus-postgres-primary
+    ports:
+      - "5432:5432"
+    networks:
+      - nexus_network
+    volumes:
+      - postgres_primary_data:/bitnami/postgresql
+      - ./postgres-init-iceberg.sql:/docker-entrypoint-initdb.d/03-iceberg.sql
+    environment:
+      POSTGRESQL_POSTGRES_PASSWORD: admin123
+      POSTGRESQL_USERNAME: admin
+      POSTGRESQL_PASSWORD: admin123
+      POSTGRESQL_DATABASE: nexus_data
+      REPMGR_PASSWORD: repmgr123
+      REPMGR_PRIMARY_HOST: postgres-primary
+      REPMGR_PRIMARY_PORT: 5432
+      REPMGR_PARTNER_NODES: postgres-primary,postgres-replica-1,postgres-replica-2
+      REPMGR_NODE_NAME: postgres-primary
+      REPMGR_NODE_NETWORK_NAME: postgres-primary
+      POSTGRESQL_NUM_SYNCHRONOUS_REPLICAS: 1
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres-replica-1:
+    image: bitnami/postgresql-repmgr:15
+    container_name: nexus-postgres-replica-1
+    ports:
+      - "5433:5432"
+    networks:
+      - nexus_network
+    volumes:
+      - postgres_replica_1_data:/bitnami/postgresql
+    environment:
+      POSTGRESQL_POSTGRES_PASSWORD: admin123
+      POSTGRESQL_USERNAME: admin
+      POSTGRESQL_PASSWORD: admin123
+      POSTGRESQL_DATABASE: nexus_data
+      REPMGR_PASSWORD: repmgr123
+      REPMGR_PRIMARY_HOST: postgres-primary
+      REPMGR_PRIMARY_PORT: 5432
+      REPMGR_PARTNER_NODES: postgres-primary,postgres-replica-1,postgres-replica-2
+      REPMGR_NODE_NAME: postgres-replica-1
+      REPMGR_NODE_NETWORK_NAME: postgres-replica-1
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres-replica-2:
+    image: bitnami/postgresql-repmgr:15
+    container_name: nexus-postgres-replica-2
+    ports:
+      - "5434:5432"
+    networks:
+      - nexus_network
+    volumes:
+      - postgres_replica_2_data:/bitnami/postgresql
+    environment:
+      POSTGRESQL_POSTGRES_PASSWORD: admin123
+      POSTGRESQL_USERNAME: admin
+      POSTGRESQL_PASSWORD: admin123
+      POSTGRESQL_DATABASE: nexus_data
+      REPMGR_PASSWORD: repmgr123
+      REPMGR_PRIMARY_HOST: postgres-primary
+      REPMGR_PRIMARY_PORT: 5432
+      REPMGR_PARTNER_NODES: postgres-primary,postgres-replica-1,postgres-replica-2
+      REPMGR_NODE_NAME: postgres-replica-2
+      REPMGR_NODE_NETWORK_NAME: postgres-replica-2
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # MINIO DISTRIBUTED - 4 Nodes
+  # ============================================
+  minio-1:
+    image: minio/minio:latest
+    container_name: nexus-minio-1
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - nexus_network
+    volumes:
+      - minio_1_data1:/data1
+      - minio_1_data2:/data2
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server http://minio-{1...4}:9000/data{1...2} --console-address ":9001"
+    healthcheck:
+      test: curl -f http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio-2:
+    image: minio/minio:latest
+    container_name: nexus-minio-2
+    networks:
+      - nexus_network
+    volumes:
+      - minio_2_data1:/data1
+      - minio_2_data2:/data2
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server http://minio-{1...4}:9000/data{1...2} --console-address ":9001"
+    healthcheck:
+      test: curl -f http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio-3:
+    image: minio/minio:latest
+    container_name: nexus-minio-3
+    networks:
+      - nexus_network
+    volumes:
+      - minio_3_data1:/data1
+      - minio_3_data2:/data2
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server http://minio-{1...4}:9000/data{1...2} --console-address ":9001"
+    healthcheck:
+      test: curl -f http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio-4:
+    image: minio/minio:latest
+    container_name: nexus-minio-4
+    networks:
+      - nexus_network
+    volumes:
+      - minio_4_data1:/data1
+      - minio_4_data2:/data2
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    command: server http://minio-{1...4}:9000/data{1...2} --console-address ":9001"
+    healthcheck:
+      test: curl -f http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ============================================
+  # ICEBERG REST CATALOG (unchanged)
+  # ============================================
+  iceberg-rest:
+    image: tabulario/iceberg-rest:latest
+    container_name: nexus-iceberg-rest
+    depends_on:
+      - postgres-primary
+      - minio-1
+    ports:
+      - "8182:8080"
+    networks:
+      - nexus_network
+    environment:
+      CATALOG_WAREHOUSE: s3://iceberg-warehouse/
+      CATALOG_S3_ENDPOINT: http://minio-1:9000
+      CATALOG_S3_ACCESS_KEY_ID: minioadmin
+      CATALOG_S3_SECRET_ACCESS_KEY: minioadmin123
+      CATALOG_S3_PATH_STYLE_ACCESS: "true"
+      CATALOG_S3_REGION: us-east-1
+      CATALOG_JDBC_URL: jdbc:postgresql://postgres-primary:5432/nexus_iceberg
+      CATALOG_JDBC_USER: admin
+      CATALOG_JDBC_PASSWORD: admin123
+      SERVER_PORT: 8080
+      LOG_LEVEL: INFO
+    healthcheck:
+      test: curl -f http://localhost:8080/v1/config || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # TRINO (unchanged, but connect to HA services)
+  # ============================================
+  trino:
+    image: trinodb/trino:latest
+    container_name: nexus-trino
+    depends_on:
+      - minio-1
+    ports:
+      - "8083:8080"
+    networks:
+      - nexus_network
+    volumes:
+      - ./trino:/etc/trino/
+    environment:
+      TRINO_PASSWORD: admin123
+    healthcheck:
+      test: curl -f http://localhost:8080/ui/ || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # CLICKHOUSE (unchanged)
+  # ============================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: nexus-clickhouse
+    ports:
+      - "8123:8123"
+      - "9440:9000"
+    networks:
+      - nexus_network
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: admin123
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # ELASTICSEARCH (unchanged)
+  # ============================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: nexus-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - nexus_network
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    healthcheck:
+      test: curl -s http://localhost:9200 >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # REDIS (unchanged)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - nexus_network
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass redis123
+    healthcheck:
+      test: redis-cli --raw incr ping
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # MONITORING - Prometheus
+  # ============================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nexus-prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - nexus_network
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # MONITORING - Grafana
+  # ============================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nexus-grafana
+    ports:
+      - "3001:3000"
+    networks:
+      - nexus_network
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    healthcheck:
+      test: curl -f http://localhost:3000/api/health || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # EXPORTERS - Kafka Exporter
+  # ============================================
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: nexus-kafka-exporter
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    ports:
+      - "9308:9308"
+    networks:
+      - nexus_network
+    command:
+      - '--kafka.server=kafka-1:29092'
+      - '--kafka.server=kafka-2:29093'
+      - '--kafka.server=kafka-3:29094'
+
+  # ============================================
+  # EXPORTERS - PostgreSQL Exporter
+  # ============================================
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: nexus-postgres-exporter
+    depends_on:
+      - postgres-primary
+    ports:
+      - "9187:9187"
+    networks:
+      - nexus_network
+    environment:
+      DATA_SOURCE_NAME: postgresql://admin:admin123@postgres-primary:5432/nexus_data?sslmode=disable
+
+  # ============================================
+  # AIRFLOW (update to use HA services)
+  # ============================================
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    image: nexus-airflow:2.7.0
+    container_name: nexus-airflow-webserver
+    depends_on:
+      - postgres-primary
+    ports:
+      - "8888:8080"
+    networks:
+      - nexus_network
+    volumes:
+      - ../../pipelines/airflow/dags:/opt/airflow/dags
+      - ../../pipelines/airflow/utils:/opt/airflow/utils
+      - ../../jobs/spark:/opt/airflow/jobs
+      - ../../packages:/opt/airflow/packages
+      - ../../conf:/opt/airflow/conf
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres-primary:5432/nexus_data
+      AIRFLOW__CORE__FERNET_KEY: 'zp8jR3vX9K4mN7wQ2tY5uI8oP1aSdF6gH9jK3lM4nB8='
+      AIRFLOW__WEBSERVER__SECRET_KEY: 'nexus-airflow-secret-key-12345'
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+      DATA_SOURCES_DB_ENABLED: 'true'
+      DATA_SOURCES_DB_HOST: postgres-primary
+      DATA_SOURCES_DB_PORT: '5432'
+      DATA_SOURCES_DB_USER: admin
+      DATA_SOURCES_DB_PASSWORD: admin123
+      DATA_SOURCES_DB_NAME: nexus_data
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29093,kafka-3:29094
+      S3_ENDPOINT: http://minio-1:9000
+    command: webserver
+
+  airflow-scheduler:
+    image: nexus-airflow:2.7.0
+    container_name: nexus-airflow-scheduler
+    depends_on:
+      - postgres-primary
+      - airflow-webserver
+    networks:
+      - nexus_network
+    volumes:
+      - ../../pipelines/airflow/dags:/opt/airflow/dags
+      - ../../pipelines/airflow/utils:/opt/airflow/utils
+      - ../../jobs/spark:/opt/airflow/jobs
+      - ../../packages:/opt/airflow/packages
+      - ../../conf:/opt/airflow/conf
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin123@postgres-primary:5432/nexus_data
+      AIRFLOW__CORE__FERNET_KEY: 'zp8jR3vX9K4mN7wQ2tY5uI8oP1aSdF6gH9jK3lM4nB8='
+      AIRFLOW__WEBSERVER__SECRET_KEY: 'nexus-airflow-secret-key-12345'
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      DATA_SOURCES_DB_ENABLED: 'true'
+      DATA_SOURCES_DB_HOST: postgres-primary
+      DATA_SOURCES_DB_PORT: '5432'
+      DATA_SOURCES_DB_USER: admin
+      DATA_SOURCES_DB_PASSWORD: admin123
+      DATA_SOURCES_DB_NAME: nexus_data
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29093,kafka-3:29094
+      S3_ENDPOINT: http://minio-1:9000
+    command: scheduler
+
+  # ============================================
+  # SUPERSET (unchanged)
+  # ============================================
+  superset:
+    image: apache/superset:latest
+    container_name: nexus-superset
+    depends_on:
+      - postgres-primary
+    ports:
+      - "8088:8088"
+    networks:
+      - nexus_network
+    volumes:
+      - superset_data:/app/superset_home
+    environment:
+      SUPERSET_SECRET_KEY: nexus-superset-secret-key
+    command: >
+      bash -c "superset db upgrade &&
+               superset fab create-admin --username admin --firstname Admin --lastname User --email admin@nexus.io --password admin123 &&
+               superset init &&
+               superset run -h 0.0.0.0 -p 8088 --with-threads --reload"
+
+networks:
+  nexus_network:
+    driver: bridge
+
+volumes:
+  # ZooKeeper
+  zookeeper_1_data:
+  zookeeper_1_logs:
+  zookeeper_2_data:
+  zookeeper_2_logs:
+  zookeeper_3_data:
+  zookeeper_3_logs:
+  
+  # Kafka
+  kafka_1_data:
+  kafka_2_data:
+  kafka_3_data:
+  
+  # PostgreSQL
+  postgres_primary_data:
+  postgres_replica_1_data:
+  postgres_replica_2_data:
+  
+  # MinIO
+  minio_1_data1:
+  minio_1_data2:
+  minio_2_data1:
+  minio_2_data2:
+  minio_3_data1:
+  minio_3_data2:
+  minio_4_data1:
+  minio_4_data2:
+  
+  # Other services
+  clickhouse_data:
+  elasticsearch_data:
+  redis_data:
+  vault_data:
+  prometheus_data:
+  grafana_data:
+  superset_data:

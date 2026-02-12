@@ -47,7 +47,7 @@ class ConfigLoader:
         Args:
             config_path: Path to sources.yaml
         """
-        self.config_path = config_path or os.getenv('CONFIG_SOURCES_PATH', 'conf/sources.yaml')
+        self.config_path = config_path or os.getenv('CONFIG_SOURCES_PATH', 'configs/sources.yaml')
         self.config = self._load_config()
         self.global_config = self.config.get('global', {})
         
@@ -439,7 +439,7 @@ class SchemaValidator:
 class PipelineOrchestrator:
     """Coordinate full extraction pipeline"""
     
-    def __init__(self, config_path: str = "conf/sources.yaml"):
+    def __init__(self, config_path: str = "configs/sources.yaml"):
         """
         Initialize pipeline
         

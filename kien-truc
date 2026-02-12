@@ -1,0 +1,201 @@
+graph TB
+    subgraph DataSources["📊 DATA SOURCES"]
+        direction TB
+        
+        subgraph AppData["1️⃣ Application Data"]
+            MobileApp[Mobile App<br/>iOS/Android]
+            WebApp[Web Application<br/>React/Vue]
+            BookingApp[Booking System]
+            
+            MobileApp -.user events.-> AppEvents
+            WebApp -.user events.-> AppEvents
+            BookingApp -.bookings.-> AppEvents
+            
+            AppEvents[User Events:<br/>- clicks<br/>- searches<br/>- ratings<br/>- bookings<br/>- session data]
+        end
+        
+        subgraph OLTPData["2️⃣ OLTP Databases"]
+            PostgresOLTP[(PostgreSQL<br/>Users & Accounts)]
+            MySQLOLTP[(MySQL<br/>Transactions)]
+            MongoOLTP[(MongoDB<br/>User Profiles)]
+            
+            CDC[Change Data Capture<br/>Debezium]
+            PostgresOLTP --> CDC
+            MySQLOLTP --> CDC
+            MongoOLTP --> CDC
+        end
+        
+        subgraph StreamData["3️⃣ Streaming Data"]
+            ClickStream[Clickstream<br/>Page Views<br/>Navigation Paths]
+            AppLogs[Application Logs<br/>Errors<br/>Performance]
+            IoTSensors[IoT Sensors<br/>Location Tracking<br/>Device Data]
+        end
+        
+        subgraph ExternalData["4️⃣ External Data"]
+            WeatherAPI[Weather API<br/>OpenWeather]
+            MapsAPI[Maps API<br/>Google/Mapbox]
+            SocialMedia[Social Media<br/>Twitter/Facebook]
+            OpenDatasets[Open Datasets<br/>Tourism Statistics]
+        end
+    end
+    
+    subgraph Ingestion["🔄 INGESTION LAYER"]
+        direction TB
+        
+        KafkaCluster[Apache Kafka Cluster]
+        
+        subgraph KafkaTopics["Kafka Topics"]
+            TopicApp[topic_app_events]
+            TopicCDC[topic_cdc_changes]
+            TopicStream[topic_clickstream]
+            TopicLogs[topic_app_logs]
+            TopicExternal[topic_external_data]
+        end
+        
+        AirflowOrch[Airflow Orchestrator<br/>Batch Ingestion Jobs]
+    end
+    
+    subgraph Processing["⚡ PROCESSING"]
+        SparkStreamProc[Spark Streaming Cluster<br/>Real-time Processing]
+        SparkBatchProc[Spark Batch Cluster<br/>ETL Jobs]
+    end
+    
+    subgraph Lakehouse["🏛️ LAKEHOUSE"]
+        direction TB
+        
+        IcebergCat[Iceberg Catalog]
+        Postgres[(PostgreSQL<br/>Metadata<br/>(small/medium scale))]
+        HiveMeta[(Hive Metastore<br/>(large scale))]
+        Nessie[(Nessie Catalog<br/>(large scale))]
+        
+        subgraph MinIOLayers["MinIO Object Storage"]
+            Bronze[🥉 Bronze<br/>s3://bronze/<br/>────────<br/>• app_events/<br/>• cdc_changes/<br/>• clickstream/<br/>• logs/<br/>• external_data/]
+            
+            Silver[🥈 Silver<br/>s3://silver/<br/>────────<br/>• users_cleaned/<br/>• bookings_validated/<br/>• clicks_enriched/<br/>• weather_normalized/]
+            
+            Gold[🥇 Gold<br/>s3://gold/<br/>────────<br/>• user_360_view/<br/>• booking_metrics/<br/>• recommendation_features/<br/>• tourism_analytics/]
+        end
+    end
+    
+    subgraph Governance["🔐 GOVERNANCE"]
+        Quality[Great Expectations<br/>Data Quality]
+        Lineage[OpenMetadata<br/>Data Lineage]
+        Access[RBAC<br/>Access Control]
+    end
+
+    subgraph Monitoring["📈 MONITORING & OBSERVABILITY"]
+        Prometheus[Prometheus]
+        Grafana[Grafana Dashboards]
+        SparkMetrics[Spark Metrics]
+        KafkaLag[Kafka Lag Monitoring]
+    end
+    
+    subgraph Analytics["📊 ANALYTICS"]
+        ClickHouse[(ClickHouse<br/>OLAP)]
+        Elastic[(Elasticsearch<br/>Search)]
+        Redis[(Cache)]
+    end
+    
+    subgraph Serving["🌐 SERVING"]
+        FastAPI[FastAPI]
+        React[React UI]
+        Superset[Superset BI]
+    end
+    
+    %% Application Data Flow
+    AppEvents --> TopicApp
+    
+    %% CDC Flow
+    CDC --> TopicCDC
+    
+    %% Streaming Flow
+    ClickStream --> TopicStream
+    AppLogs --> TopicLogs
+    IoTSensors --> TopicStream
+    
+    %% External Data Flow
+    WeatherAPI --> AirflowOrch
+    MapsAPI --> AirflowOrch
+    SocialMedia --> AirflowOrch
+    OpenDatasets --> AirflowOrch
+    AirflowOrch --> TopicExternal
+    
+    %% Kafka to Processing
+    TopicApp --> SparkStreamProc
+    TopicCDC --> SparkStreamProc
+    TopicStream --> SparkStreamProc
+    TopicLogs --> SparkStreamProc
+    TopicExternal --> SparkStreamProc
+    
+    %% Processing to Bronze
+    SparkStreamProc --> Bronze
+    
+    %% Batch Processing
+    AirflowOrch -.trigger.-> SparkBatchProc
+    
+    %% Medallion Flow
+    Bronze --> SparkBatchProc
+    SparkBatchProc --> Silver
+    Silver --> SparkBatchProc
+    SparkBatchProc --> Gold
+    
+    %% Iceberg Integration
+    SparkBatchProc <--> IcebergCat
+    IcebergCat --> Postgres
+    IcebergCat -.optional.-> HiveMeta
+    IcebergCat -.optional.-> Nessie
+    IcebergCat -.metadata.-> Bronze & Silver & Gold
+    
+    %% Governance (cross-cutting)
+    KafkaCluster --> Quality
+    AirflowOrch --> Quality
+    SparkBatchProc --> Quality
+    FastAPI --> Quality
+    Superset --> Quality
+    Quality -.validate.-> Silver & Gold
+
+    KafkaCluster --> Lineage
+    AirflowOrch --> Lineage
+    SparkBatchProc --> Lineage
+    FastAPI --> Lineage
+    Superset --> Lineage
+    Lineage -.track.-> Bronze & Silver & Gold
+
+    Access -.enforce.-> KafkaCluster
+    Access -.enforce.-> SparkStreamProc
+    Access -.enforce.-> SparkBatchProc
+    Access -.enforce.-> FastAPI
+    Access -.enforce.-> Superset
+    
+    %% Analytics
+    Gold --> ClickHouse
+    Gold --> Elastic
+    
+    %% Serving Layer
+    ClickHouse --> FastAPI
+    Elastic --> FastAPI
+    Redis --> FastAPI
+    FastAPI --> React
+    Gold --> Superset
+
+    %% Monitoring
+    KafkaCluster --> KafkaLag
+    SparkStreamProc --> SparkMetrics
+    SparkBatchProc --> SparkMetrics
+    FastAPI --> Prometheus
+    KafkaLag --> Prometheus
+    SparkMetrics --> Prometheus
+    Prometheus --> Grafana
+    
+    %% Styling
+    style Bronze fill:#CD7F32,color:#fff,stroke:#8B4513,stroke-width:3px
+    style Silver fill:#C0C0C0,color:#000,stroke:#696969,stroke-width:3px
+    style Gold fill:#FFD700,color:#000,stroke:#DAA520,stroke-width:3px
+    style AppData fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style OLTPData fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style StreamData fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    style ExternalData fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style KafkaCluster fill:#ff6b6b,color:#fff
+    style Quality fill:#f9ca24,color:#000
+    style Lineage fill:#f0932b,color:#fff
+    style Access fill:#eb4d4b,color:#fff

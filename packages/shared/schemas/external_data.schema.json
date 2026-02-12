@@ -1,0 +1,190 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus-data-platform.io/schemas/external_data.schema.json",
+  "title": "External Data Schema",
+  "description": "Schema for external API data (weather, maps, social media, etc.)",
+  "type": "object",
+  "required": [
+    "source",
+    "data_type",
+    "timestamp",
+    "data"
+  ],
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "External data source identifier",
+      "enum": ["openweather", "google_maps", "twitter", "facebook", "open_dataset"]
+    },
+    "data_type": {
+      "type": "string",
+      "description": "Type of external data",
+      "enum": ["weather", "maps", "social", "statistics", "flight", "exchange_rate"]
+    },
+    "location": {
+      "type": "object",
+      "description": "Location information for the data",
+      "properties": {
+        "city": {
+          "type": "string"
+        },
+        "country": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}$"
+        },
+        "lat": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "lon": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Data timestamp"
+    },
+    "data": {
+      "type": "object",
+      "description": "External data payload (varies by source)",
+      "oneOf": [
+        {
+          "title": "Weather Data",
+          "properties": {
+            "current": {
+              "type": "object",
+              "properties": {
+                "temp": {
+                  "type": "number"
+                },
+                "feels_like": {
+                  "type": "number"
+                },
+                "humidity": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "pressure": {
+                  "type": "integer"
+                },
+                "wind_speed": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "weather": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": "string"
+                }
+              }
+            },
+            "forecast": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "temp_min": {
+                    "type": "number"
+                  },
+                  "temp_max": {
+                    "type": "number"
+                  },
+                  "precipitation": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "weather": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "title": "Maps/POI Data",
+          "properties": {
+            "place_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            },
+            "rating": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "address": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "title": "Social Media Data",
+          "properties": {
+            "post_id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "sentiment": {
+              "type": "string",
+              "enum": ["positive", "neutral", "negative"]
+            },
+            "engagement": {
+              "type": "object",
+              "properties": {
+                "likes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "shares": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "comments": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional metadata",
+      "properties": {
+        "api_version": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "rate_limit_remaining": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,440 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "nexus-dlq-monitoring",
+    "title": "Nexus Data Platform - DLQ Monitoring",
+    "tags": ["nexus", "dlq", "kafka", "ha"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "🎯 DLQ Overview",
+        "type": "stat",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 24,
+          "h": 3
+        },
+        "targets": [
+          {
+            "expr": "sum(kafka_topic_partition_current_offset{topic=~\"dlq.*\"})",
+            "refId": "A",
+            "legendFormat": "Total DLQ Messages"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "background",
+          "graphMode": "area",
+          "justifyMode": "center"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 100, "color": "yellow"},
+                {"value": 1000, "color": "red"}
+              ]
+            },
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "📮 DLQ Message Rate by Topic",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 3,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (topic) (rate(kafka_topic_partition_current_offset{topic=~\"dlq.*\"}[5m]))",
+            "refId": "A",
+            "legendFormat": "{{topic}}"
+          }
+        ],
+        "options": {
+          "tooltip": {
+            "mode": "multi"
+          },
+          "legend": {
+            "displayMode": "table",
+            "placement": "bottom",
+            "calcs": ["last", "mean", "max"]
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "gradientMode": "opacity",
+              "axisPlacement": "auto",
+              "drawStyle": "line",
+              "pointSize": 5
+            },
+            "unit": "msg/s"
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "📊 DLQ Messages by Type",
+        "type": "piechart",
+        "gridPos": {
+          "x": 12,
+          "y": 3,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (topic) (kafka_topic_partition_current_offset{topic=~\"dlq.*\"})",
+            "refId": "A",
+            "legendFormat": "{{topic}}"
+          }
+        ],
+        "options": {
+          "legend": {
+            "displayMode": "table",
+            "placement": "right",
+            "calcs": ["lastNotNull", "percent"]
+          },
+          "pieType": "donut",
+          "tooltip": {
+            "mode": "single"
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "unit": "short"
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "dlq_failed_messages"},
+              "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+            },
+            {
+              "matcher": {"id": "byName", "options": "dlq_schema_validation_errors"},
+              "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]
+            },
+            {
+              "matcher": {"id": "byName", "options": "dlq_processing_errors"},
+              "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]
+            }
+          ]
+        }
+      },
+      {
+        "id": 4,
+        "title": "🚨 Schema Validation Errors Over Time",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 11,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum(kafka_topic_partition_current_offset{topic=\"dlq_schema_validation_errors\"})",
+            "refId": "A",
+            "legendFormat": "Schema Validation Errors"
+          }
+        ],
+        "options": {
+          "tooltip": {
+            "mode": "multi"
+          },
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "fixed",
+              "fixedColor": "orange"
+            },
+            "custom": {
+              "lineWidth": 3,
+              "fillOpacity": 25,
+              "gradientMode": "opacity",
+              "axisPlacement": "auto",
+              "drawStyle": "line",
+              "pointSize": 5
+            },
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "⚙️ Processing Errors Rate",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 12,
+          "y": 11,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(kafka_topic_partition_current_offset{topic=\"dlq_processing_errors\"}[5m])",
+            "refId": "A",
+            "legendFormat": "Processing Errors/sec"
+          }
+        ],
+        "options": {
+          "tooltip": {
+            "mode": "multi"
+          },
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "fixed",
+              "fixedColor": "yellow"
+            },
+            "custom": {
+              "lineWidth": 3,
+              "fillOpacity": 25,
+              "gradientMode": "hue",
+              "axisPlacement": "auto",
+              "drawStyle": "bars",
+              "barAlignment": 0
+            },
+            "unit": "msg/s",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 5, "color": "yellow"},
+                {"value": 10, "color": "red"}
+              ]
+            }
+          }
+        },
+        "alert": {
+          "name": "High Processing Error Rate",
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [10],
+                "type": "gt"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "params": ["A", "5m", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "avg"
+              },
+              "type": "query"
+            }
+          ]
+        }
+      },
+      {
+        "id": 6,
+        "title": "📈 DLQ Messages - Last 24 Hours",
+        "type": "bargauge",
+        "gridPos": {
+          "x": 0,
+          "y": 19,
+          "w": 8,
+          "h": 6
+        },
+        "targets": [
+          {
+            "expr": "sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~\"dlq.*\"}[24h]))",
+            "refId": "A",
+            "legendFormat": "{{topic}}"
+          }
+        ],
+        "options": {
+          "orientation": "horizontal",
+          "displayMode": "gradient",
+          "showUnfilled": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "continuous-RdYlGn"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 100, "color": "yellow"},
+                {"value": 500, "color": "red"}
+              ]
+            },
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "🎯 DLQ Health Score",
+        "type": "gauge",
+        "gridPos": {
+          "x": 8,
+          "y": 19,
+          "w": 8,
+          "h": 6
+        },
+        "targets": [
+          {
+            "expr": "100 - (sum(rate(kafka_topic_partition_current_offset{topic=~\"dlq.*\"}[5m])) * 10)",
+            "refId": "A",
+            "legendFormat": "Health Score"
+          }
+        ],
+        "options": {
+          "orientation": "auto",
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 50, "color": "yellow"},
+                {"value": 80, "color": "green"}
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "📋 Recent DLQ Activity",
+        "type": "table",
+        "gridPos": {
+          "x": 16,
+          "y": 19,
+          "w": 8,
+          "h": 6
+        },
+        "targets": [
+          {
+            "expr": "kafka_topic_partition_current_offset{topic=~\"dlq.*\"}",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "displayName": "Value",
+              "desc": true
+            }
+          ]
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto"
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "topic"},
+              "properties": [
+                {"id": "custom.width", "value": 250}
+              ]
+            }
+          ]
+        },
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "instance": true,
+                "job": true
+              },
+              "renameByName": {
+                "topic": "DLQ Topic",
+                "partition": "Partition",
+                "Value": "Messages"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus",
+          "current": {
+            "text": "Prometheus",
+            "value": "Prometheus"
+          }
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "DLQ Spikes",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "rate(kafka_topic_partition_current_offset{topic=~\"dlq.*\"}[5m]) > 10",
+          "iconColor": "red",
+          "tagKeys": "topic"
+        }
+      ]
+    }
+  },
+  "overwrite": true
+}

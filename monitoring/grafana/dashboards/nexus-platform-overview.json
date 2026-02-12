@@ -1,0 +1,415 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "nexus-platform-overview",
+    "title": "🚀 Nexus Data Platform - Overview",
+    "tags": ["nexus", "overview", "platform"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "",
+        "type": "text",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 24,
+          "h": 3
+        },
+        "options": {
+          "mode": "markdown",
+          "content": "# 🚀 Nexus Data Platform - Real-Time Monitoring\n\n**Tourism Events Processing Pipeline** | High Availability Architecture | Schema Registry & DLQ Integration\n\nLast Updated: {{__dashboard.name}} • Refresh: {{__dashboard.refresh}}"
+        }
+      },
+      {
+        "id": 2,
+        "title": "🎯 System Health Score",
+        "type": "gauge",
+        "gridPos": {
+          "x": 0,
+          "y": 3,
+          "w": 6,
+          "h": 6
+        },
+        "targets": [
+          {
+            "expr": "(sum(up{job=~\"kafka.*\"}) / count(up{job=~\"kafka.*\"}) + sum(up{job=~\"postgres.*\"}) / count(up{job=~\"postgres.*\"}) + sum(up{job=\"minio\"}) / count(up{job=\"minio\"})) / 3 * 100",
+            "refId": "A",
+            "legendFormat": "Health Score"
+          }
+        ],
+        "options": {
+          "orientation": "auto",
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 70, "color": "yellow"},
+                {"value": 90, "color": "green"}
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "📊 Data Pipeline Throughput",
+        "type": "stat",
+        "gridPos": {
+          "x": 6,
+          "y": 3,
+          "w": 6,
+          "h": 6
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(kafka_topic_partition_current_offset{topic!~\"dlq.*\"}[5m]))",
+            "refId": "A",
+            "legendFormat": "Messages/sec"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "background",
+          "graphMode": "area"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "blue"},
+                {"value": 10, "color": "green"},
+                {"value": 100, "color": "yellow"}
+              ]
+            },
+            "unit": "msg/s"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "⚠️ Error Rate",
+        "type": "stat",
+        "gridPos": {
+          "x": 12,
+          "y": 3,
+          "w": 6,
+          "h": 6
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(kafka_topic_partition_current_offset{topic=~\"dlq.*\"}[5m]))",
+            "refId": "A",
+            "legendFormat": "Errors/sec"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "auto",
+          "textMode": "value_and_name",
+          "colorMode": "background",
+          "graphMode": "area"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 1, "color": "yellow"},
+                {"value": 5, "color": "red"}
+              ]
+            },
+            "unit": "msg/s"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "✅ Data Quality Score",
+        "type": "gauge",
+        "gridPos": {
+          "x": 18,
+          "y": 3,
+          "w": 6,
+          "h": 6
+        },
+        "targets": [
+          {
+            "expr": "(1 - (sum(rate(kafka_topic_partition_current_offset{topic=~\"dlq.*\"}[5m])) / (sum(rate(kafka_topic_partition_current_offset[5m])) + 0.001))) * 100",
+            "refId": "A",
+            "legendFormat": "Quality Score"
+          }
+        ],
+        "options": {
+          "orientation": "auto",
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 80, "color": "yellow"},
+                {"value": 95, "color": "green"}
+              ]
+            },
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "📈 Kafka Cluster Status",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 9,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (instance) (kafka_server_brokertopicmetrics_messagesin_total)",
+            "refId": "A",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "options": {
+          "tooltip": {
+            "mode": "multi"
+          },
+          "legend": {
+            "displayMode": "table",
+            "placement": "bottom",
+            "calcs": ["last", "mean", "max"]
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "gradientMode": "opacity",
+              "axisPlacement": "auto",
+              "drawStyle": "line"
+            },
+            "unit": "msg/s"
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "💾 Storage Systems Health",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 12,
+          "y": 9,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "up{job=~\"postgres.*|minio|clickhouse\"}",
+            "refId": "A",
+            "legendFormat": "{{job}} - {{instance}}"
+          }
+        ],
+        "options": {
+          "tooltip": {
+            "mode": "multi"
+          },
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 20,
+              "gradientMode": "none",
+              "axisPlacement": "auto",
+              "drawStyle": "line"
+            },
+            "unit": "short",
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "🔄 Services Status",
+        "type": "table",
+        "gridPos": {
+          "x": 0,
+          "y": 17,
+          "w": 12,
+          "h": 6
+        },
+        "targets": [
+          {
+            "expr": "up",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "displayName": "Job",
+              "desc": false
+            }
+          ]
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto"
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Value"},
+              "properties": [
+                {
+                  "id": "custom.displayMode",
+                  "value": "color-background"
+                },
+                {
+                  "id": "thresholds",
+                  "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {"value": null, "color": "red"},
+                      {"value": 1, "color": "green"}
+                    ]
+                  }
+                },
+                {
+                  "id": "mappings",
+                  "value": [
+                    {"type": "value", "options": {"0": {"text": "❌ DOWN", "color": "red"}}},
+                    {"type": "value", "options": {"1": {"text": "✅ UP", "color": "green"}}}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true
+              },
+              "renameByName": {
+                "job": "Service",
+                "instance": "Instance",
+                "Value": "Status"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "⚡ Recent Alerts",
+        "type": "alertlist",
+        "gridPos": {
+          "x": 12,
+          "y": 17,
+          "w": 12,
+          "h": 6
+        },
+        "options": {
+          "showOptions": "current",
+          "maxItems": 10,
+          "sortOrder": 3,
+          "dashboardAlerts": false,
+          "alertName": "",
+          "dashboardTitle": "",
+          "tags": ["nexus"],
+          "stateFilter": {
+            "ok": false,
+            "paused": false,
+            "no_data": false,
+            "execution_error": false,
+            "alerting": true,
+            "pending": true
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus",
+          "current": {
+            "text": "Prometheus",
+            "value": "Prometheus"
+          }
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "Prometheus",
+          "enable": true,
+          "iconColor": "blue"
+        }
+      ]
+    }
+  },
+  "overwrite": true
+}

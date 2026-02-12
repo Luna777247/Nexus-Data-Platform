@@ -1,0 +1,750 @@
+version: '3.8'
+networks:
+  nexus_network:
+    driver: bridge
+volumes:
+  zookeeper_data: null
+  kafka_1_data: null
+  kafka_2_data: null
+  kafka_3_data: null
+  postgres_data: null
+  minio_1_data: null
+  minio_2_data: null
+  minio_3_data: null
+  minio_4_data: null
+  prometheus_data: null
+  grafana_data: null
+  openmetadata_data: null
+  spark_stream_data: null
+  spark_batch_data: null
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: nexus-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+    - 2181:2181
+    networks:
+    - nexus_network
+    volumes:
+    - zookeeper_data:/var/lib/zookeeper/data
+    healthcheck:
+      test: echo stat | nc localhost 2181
+      interval: 10s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '1'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+  kafka-1:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-1
+    depends_on:
+    - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: kafka-1
+    ports:
+    - 9092:9092
+    - 9101:9101
+    networks:
+    - nexus_network
+    volumes:
+    - kafka_1_data:/var/lib/kafka/data
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:9092
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1.5G
+          cpus: '0.5'
+  kafka-2:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-2
+    depends_on:
+    - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29093,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_JMX_PORT: 9102
+      KAFKA_JMX_HOSTNAME: kafka-2
+    ports:
+    - 9093:9093
+    - 9102:9102
+    networks:
+    - nexus_network
+    volumes:
+    - kafka_2_data:/var/lib/kafka/data
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:9093
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1.5G
+          cpus: '0.5'
+  kafka-3:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-3
+    depends_on:
+    - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:29094,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_JMX_PORT: 9103
+      KAFKA_JMX_HOSTNAME: kafka-3
+    ports:
+    - 9094:9094
+    - 9103:9103
+    networks:
+    - nexus_network
+    volumes:
+    - kafka_3_data:/var/lib/kafka/data
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:9094
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1.5G
+          cpus: '0.5'
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    container_name: nexus-schema-registry
+    depends_on:
+    - kafka-1
+    - kafka-2
+    - kafka-3
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29093,kafka-3:29094
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    ports:
+    - 8081:8081
+    networks:
+    - nexus_network
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8081/subjects
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 768M
+          cpus: '0.25'
+  spark-stream-master:
+    image: bitnami/spark:3.5.0
+    container_name: nexus-spark-stream-master
+    environment:
+    - SPARK_MODE=master
+    - SPARK_RPC_AUTHENTICATION_ENABLED=no
+    - SPARK_RPC_ENCRYPTION_ENABLED=no
+    - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+    - SPARK_SSL_ENABLED=no
+    - SPARK_MASTER_WEBUI_PORT=8080
+    ports:
+    - 7077:7077
+    - 8080:8080
+    networks:
+    - nexus_network
+    volumes:
+    - spark_stream_data:/opt/spark-data
+    - ../../jobs/spark:/opt/spark-jobs
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8080/json/
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1.5G
+          cpus: '1'
+  spark-stream-worker-1:
+    image: bitnami/spark:3.5.0
+    container_name: nexus-spark-stream-worker-1
+    depends_on:
+    - spark-stream-master
+    environment:
+    - SPARK_MODE=worker
+    - SPARK_MASTER_URL=spark://spark-stream-master:7077
+    - SPARK_WORKER_MEMORY=2G
+    - SPARK_WORKER_CORES=2
+    - SPARK_RPC_AUTHENTICATION_ENABLED=no
+    - SPARK_RPC_ENCRYPTION_ENABLED=no
+    networks:
+    - nexus_network
+    volumes:
+    - ../../jobs/spark:/opt/spark-jobs
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8081/
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1.5G
+          cpus: '1'
+  spark-stream-worker-2:
+    image: bitnami/spark:3.5.0
+    container_name: nexus-spark-stream-worker-2
+    depends_on:
+    - spark-stream-master
+    environment:
+    - SPARK_MODE=worker
+    - SPARK_MASTER_URL=spark://spark-stream-master:7077
+    - SPARK_WORKER_MEMORY=2G
+    - SPARK_WORKER_CORES=2
+    - SPARK_RPC_AUTHENTICATION_ENABLED=no
+    - SPARK_RPC_ENCRYPTION_ENABLED=no
+    networks:
+    - nexus_network
+    volumes:
+    - ../../jobs/spark:/opt/spark-jobs
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8081/
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1.5G
+          cpus: '1'
+  spark-batch-master:
+    image: bitnami/spark:3.5.0
+    container_name: nexus-spark-batch-master
+    environment:
+    - SPARK_MODE=master
+    - SPARK_RPC_AUTHENTICATION_ENABLED=no
+    - SPARK_RPC_ENCRYPTION_ENABLED=no
+    - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+    - SPARK_SSL_ENABLED=no
+    - SPARK_MASTER_WEBUI_PORT=8081
+    ports:
+    - 7078:7077
+    - 8082:8081
+    networks:
+    - nexus_network
+    volumes:
+    - spark_batch_data:/opt/spark-data
+    - ../../jobs/spark:/opt/spark-jobs
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8082/json/
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+        reservations:
+          memory: 3G
+          cpus: '2'
+  spark-batch-worker-1:
+    image: bitnami/spark:3.5.0
+    container_name: nexus-spark-batch-worker-1
+    depends_on:
+    - spark-batch-master
+    environment:
+    - SPARK_MODE=worker
+    - SPARK_MASTER_URL=spark://spark-batch-master:7077
+    - SPARK_WORKER_MEMORY=4G
+    - SPARK_WORKER_CORES=4
+    - SPARK_RPC_AUTHENTICATION_ENABLED=no
+    - SPARK_RPC_ENCRYPTION_ENABLED=no
+    networks:
+    - nexus_network
+    volumes:
+    - ../../jobs/spark:/opt/spark-jobs
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8081/
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+        reservations:
+          memory: 3G
+          cpus: '2'
+  spark-batch-worker-2:
+    image: bitnami/spark:3.5.0
+    container_name: nexus-spark-batch-worker-2
+    depends_on:
+    - spark-batch-master
+    environment:
+    - SPARK_MODE=worker
+    - SPARK_MASTER_URL=spark://spark-batch-master:7077
+    - SPARK_WORKER_MEMORY=4G
+    - SPARK_WORKER_CORES=4
+    - SPARK_RPC_AUTHENTICATION_ENABLED=no
+    - SPARK_RPC_ENCRYPTION_ENABLED=no
+    networks:
+    - nexus_network
+    volumes:
+    - ../../jobs/spark:/opt/spark-jobs
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8081/
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+        reservations:
+          memory: 3G
+          cpus: '2'
+  postgres-iceberg:
+    image: postgres:15-alpine
+    container_name: nexus-postgres-iceberg
+    environment:
+      POSTGRES_USER: iceberg
+      POSTGRES_PASSWORD: iceberg123
+      POSTGRES_DB: iceberg_catalog
+    ports:
+    - 5432:5432
+    networks:
+    - nexus_network
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    - ./postgres-init-iceberg.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U iceberg
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1.5G
+          cpus: '1'
+  minio-1:
+    image: minio/minio:RELEASE-2024-01-01T16-36-33Z
+    container_name: nexus-minio-1
+    command: server http://minio-{1...4}/data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    ports:
+    - 9000:9000
+    - 9001:9001
+    networks:
+    - nexus_network
+    volumes:
+    - minio_1_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '1'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+  minio-2:
+    image: minio/minio:RELEASE-2024-01-01T16-36-33Z
+    container_name: nexus-minio-2
+    command: server http://minio-{1...4}/data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    networks:
+    - nexus_network
+    volumes:
+    - minio_2_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '1'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+  minio-3:
+    image: minio/minio:RELEASE-2024-01-01T16-36-33Z
+    container_name: nexus-minio-3
+    command: server http://minio-{1...4}/data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    networks:
+    - nexus_network
+    volumes:
+    - minio_3_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '1'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+  minio-4:
+    image: minio/minio:RELEASE-2024-01-01T16-36-33Z
+    container_name: nexus-minio-4
+    command: server http://minio-{1...4}/data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    networks:
+    - nexus_network
+    volumes:
+    - minio_4_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9000/minio/health/live
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '1'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+  data-quality:
+    image: python:3.11-slim
+    container_name: nexus-data-quality
+    working_dir: /app
+    command: "bash -c \"pip install great-expectations==0.18.0 &&\n         python\
+      \ -m http.server 8000\"\n"
+    ports:
+    - 8000:8000
+    networks:
+    - nexus_network
+    volumes:
+    - ../../pipelines/airflow/utils:/app
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8000/
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 768M
+          cpus: '0.25'
+  openmetadata:
+    image: openmetadata/server:1.2.0
+    container_name: nexus-openmetadata
+    depends_on:
+    - postgres-iceberg
+    environment:
+      OPENMETADATA_CLUSTER_NAME: nexus-cluster
+      DB_DRIVER_CLASS: org.postgresql.Driver
+      DB_SCHEME: postgresql
+      DB_USER: iceberg
+      DB_PASSWORD: iceberg123
+      DB_HOST: postgres-iceberg
+      DB_PORT: 5432
+      DB_USE_SSL: 'false'
+      OM_DATABASE: openmetadata_db
+    ports:
+    - 8585:8585
+    networks:
+    - nexus_network
+    volumes:
+    - openmetadata_data:/opt/openmetadata
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8585/
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1.5G
+          cpus: '0.5'
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: nexus-prometheus
+    command:
+    - --config.file=/etc/prometheus/prometheus.yml
+    - --storage.tsdb.path=/prometheus
+    - --web.console.libraries=/usr/share/prometheus/console_libraries
+    - --web.console.templates=/usr/share/prometheus/consoles
+    ports:
+    - 9090:9090
+    networks:
+    - nexus_network
+    volumes:
+    - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    - prometheus_data:/prometheus
+    depends_on:
+    - kafka-1
+    - spark-stream-master
+    - spark-batch-master
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9090/-/healthy
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: nexus-grafana
+    environment:
+    - GF_SECURITY_ADMIN_USER=admin
+    - GF_SECURITY_ADMIN_PASSWORD=admin123
+    - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+    - 3000:3000
+    networks:
+    - nexus_network
+    volumes:
+    - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    - grafana_data:/var/lib/grafana
+    depends_on:
+    - prometheus
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:3000/api/health
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: nexus-kafka-exporter
+    command:
+    - --kafka.server=kafka-1:29092
+    - --kafka.server=kafka-2:29093
+    - --kafka.server=kafka-3:29094
+    ports:
+    - 9308:9308
+    networks:
+    - nexus_network
+    depends_on:
+    - kafka-1
+    - kafka-2
+    - kafka-3
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9308/
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.12
+    container_name: nexus-clickhouse
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse123
+      CLICKHOUSE_DB: analytics
+    ports:
+    - 8123:8123
+    - 9000:9000
+    networks:
+    - nexus_network
+    volumes:
+    - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - --quiet
+      - --tries=1
+      - --spider
+      - http://localhost:8123/ping
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1.5G
+          cpus: '1'

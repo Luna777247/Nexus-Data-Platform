@@ -1,0 +1,434 @@
+# ═══════════════════════════════════════════════════════════════
+# Nexus Data Platform - Data Sources Configuration
+# ═══════════════════════════════════════════════════════════════
+
+# Global Settings
+global:
+  environment: production
+  data_lake_bucket: nexus-data-lake
+  kafka_bootstrap_servers: "kafka-1:9092,kafka-2:9092,kafka-3:9092"
+  schema_registry_url: "http://schema-registry:8081"
+  
+# ═══════════════════════════════════════════════════════════════
+# 1️⃣ APPLICATION DATA SOURCES
+# ═══════════════════════════════════════════════════════════════
+application_data:
+  
+  # Mobile App Events
+  mobile_app_events:
+    enabled: true
+    source_type: application
+    ingestion_method: kafka_streaming
+    kafka_topic: topic_app_events
+    schema_file: schemas/app_events.avsc
+    target_layer: bronze
+    target_path: s3://bronze/app_events/
+    partitioning:
+      - date
+      - hour
+      - device_type
+    retention_days: 30
+    data_quality_checks:
+      - schema_validation
+      - duplicate_detection
+      - timestamp_verification
+    
+  # Web App Events
+  web_app_events:
+    enabled: true
+    source_type: application
+    ingestion_method: kafka_streaming
+    kafka_topic: topic_web_events
+    schema_file: schemas/web_events.avsc
+    target_layer: bronze
+    target_path: s3://bronze/web_events/
+    partitioning:
+      - date
+      - hour
+    retention_days: 30
+    
+  # Booking Transactions
+  booking_events:
+    enabled: true
+    source_type: application
+    ingestion_method: kafka_streaming
+    kafka_topic: topic_bookings
+    schema_file: schemas/booking.avsc
+    target_layer: bronze
+    target_path: s3://bronze/bookings/
+    partitioning:
+      - date
+      - status
+    retention_days: 90
+    encryption: true
+    pii_fields:
+      - user_email
+      - phone_number
+      - payment_info
+
+# ═══════════════════════════════════════════════════════════════
+# 2️⃣ OLTP DATABASE SOURCES (CDC)
+# ═══════════════════════════════════════════════════════════════
+oltp_databases:
+  
+  # PostgreSQL - User Management
+  postgres_users_db:
+    enabled: true
+    source_type: cdc
+    connector: debezium_postgresql
+    database:
+      host: postgres-prod.internal
+      port: 5432
+      name: nexus_users
+      user: debezium_user
+      password: ${POSTGRES_DEBEZIUM_PASSWORD}
+    tables:
+      - public.users
+      - public.user_profiles
+      - public.user_preferences
+      - public.sessions
+    kafka_topic: topic_cdc_postgres_users
+    target_layer: bronze
+    target_path: s3://bronze/cdc_postgres/users/
+    cdc_config:
+      publication_name: nexus_cdc_publication
+      slot_name: debezium_slot
+      snapshot_mode: initial
+      plugin_name: pgoutput
+    retention_days: 60
+    
+  # MySQL - Transactions
+  mysql_transactions_db:
+    enabled: true
+    source_type: cdc
+    connector: debezium_mysql
+    database:
+      host: mysql-prod.internal
+      port: 3306
+      name: nexus_transactions
+      user: debezium_user
+      password: ${MYSQL_DEBEZIUM_PASSWORD}
+    tables:
+      - nexus_transactions.payments
+      - nexus_transactions.orders
+      - nexus_transactions.invoices
+    kafka_topic: topic_cdc_mysql_transactions
+    target_layer: bronze
+    target_path: s3://bronze/cdc_mysql/transactions/
+    cdc_config:
+      server_id: 12345
+      binlog_format: ROW
+      snapshot_mode: when_needed
+    retention_days: 90
+    encryption: true
+    
+  # MongoDB - User Profiles
+  mongodb_profiles:
+    enabled: true
+    source_type: cdc
+    connector: debezium_mongodb
+    database:
+      connection_string: ${MONGODB_CONNECTION_STRING}
+      database_name: nexus_profiles
+    collections:
+      - user_profiles
+      - user_preferences
+      - user_history
+    kafka_topic: topic_cdc_mongodb_profiles
+    target_layer: bronze
+    target_path: s3://bronze/cdc_mongodb/profiles/
+    retention_days: 60
+
+# ═══════════════════════════════════════════════════════════════
+# 3️⃣ STREAMING DATA SOURCES
+# ═══════════════════════════════════════════════════════════════
+streaming_data:
+  
+  # Clickstream Analytics
+  clickstream:
+    enabled: true
+    source_type: streaming
+    ingestion_method: kafka_streaming
+    kafka_topic: topic_clickstream
+    schema_file: schemas/clickstream.avsc
+    target_layer: bronze
+    target_path: s3://bronze/clickstream/
+    partitioning:
+      - date
+      - hour
+      - page_category
+    retention_days: 14
+    sampling_rate: 1.0  # 100% of events
+    
+  # Application Logs
+  application_logs:
+    enabled: true
+    source_type: streaming
+    ingestion_method: kafka_streaming
+    kafka_topic: topic_app_logs
+    schema_file: schemas/app_logs.avsc
+    target_layer: bronze
+    target_path: s3://bronze/app_logs/
+    partitioning:
+      - date
+      - hour
+      - log_level
+      - service_name
+    retention_days: 30
+    log_levels:
+      - ERROR
+      - WARN
+      - INFO
+    filtering:
+      exclude_debug: true
+      exclude_trace: true
+    
+  # IoT Sensors (Location Tracking)
+  iot_location_sensors:
+    enabled: true
+    source_type: streaming
+    ingestion_method: kafka_streaming
+    kafka_topic: topic_iot_location
+    schema_file: schemas/iot_location.avsc
+    target_layer: bronze
+    target_path: s3://bronze/iot/location/
+    partitioning:
+      - date
+      - hour
+      - region
+    retention_days: 14
+    geo_accuracy: medium  # low, medium, high
+    privacy:
+      anonymize: true
+      location_precision: 100  # meters
+      
+  # Real-time User Activity
+  realtime_activity:
+    enabled: true
+    source_type: streaming
+    ingestion_method: kafka_streaming
+    kafka_topic: topic_realtime_activity
+    schema_file: schemas/activity.avsc
+    target_layer: bronze
+    target_path: s3://bronze/realtime_activity/
+    partitioning:
+      - date
+      - hour
+    retention_days: 7
+    deduplication_window: 60  # seconds
+
+# ═══════════════════════════════════════════════════════════════
+# 4️⃣ EXTERNAL DATA SOURCES
+# ═══════════════════════════════════════════════════════════════
+external_data:
+  
+  # Weather Data
+  weather_api:
+    enabled: true
+    source_type: external_api
+    ingestion_method: airflow_batch
+    api:
+      provider: openweather
+      endpoint: https://api.openweathermap.org/data/2.5/weather
+      auth_type: api_key
+      api_key: ${OPENWEATHER_API_KEY}
+    locations:
+      - city: Seoul
+        country: KR
+      - city: Tokyo
+        country: JP
+      - city: Bangkok
+        country: TH
+      - city: Singapore
+        country: SG
+      - city: Hanoi
+        country: VN
+    schedule: "0 * * * *"  # Every hour
+    kafka_topic: topic_external_weather
+    target_layer: bronze
+    target_path: s3://bronze/external/weather/
+    retention_days: 365
+    
+  # Maps & Points of Interest
+  maps_api:
+    enabled: true
+    source_type: external_api
+    ingestion_method: on_demand
+    api:
+      provider: google_maps
+      endpoint: https://maps.googleapis.com/maps/api/place
+      auth_type: api_key
+      api_key: ${GOOGLE_MAPS_API_KEY}
+    categories:
+      - tourist_attractions
+      - restaurants
+      - hotels
+      - museums
+    target_layer: bronze
+    target_path: s3://bronze/external/maps/
+    retention_days: 90
+    
+  # Social Media Sentiment
+  social_media:
+    enabled: true
+    source_type: external_api
+    ingestion_method: streaming
+    platforms:
+      - platform: twitter
+        api_version: v2
+        auth: ${TWITTER_BEARER_TOKEN}
+        keywords:
+          - "#travel"
+          - "#tourism"
+          - "@nexustourism"
+      - platform: facebook
+        api_version: v18.0
+        auth: ${FACEBOOK_ACCESS_TOKEN}
+        pages:
+          - nexus_tourism_official
+    kafka_topic: topic_external_social
+    target_layer: bronze
+    target_path: s3://bronze/external/social_media/
+    retention_days: 30
+    
+  # Currency Exchange Rates
+  exchange_rates:
+    enabled: true
+    source_type: external_api
+    ingestion_method: airflow_batch
+    api:
+      provider: exchangerate_api
+      endpoint: https://api.exchangerate-api.com/v4/latest/USD
+      auth_type: none
+    currencies:
+      - USD
+      - EUR
+      - JPY
+      - KRW
+      - VND
+      - THB
+    schedule: "0 0 * * *"  # Daily at midnight
+    kafka_topic: topic_external_exchange
+    target_layer: bronze
+    target_path: s3://bronze/external/exchange_rates/
+    retention_days: 365
+    
+  # Flight Data
+  flight_data:
+    enabled: false  # Premium API
+    source_type: external_api
+    ingestion_method: streaming
+    api:
+      provider: aviation_edge
+      endpoint: https://aviation-edge.com/v2/public/flights
+      auth_type: api_key
+      api_key: ${AVIATION_EDGE_API_KEY}
+    airports:
+      - ICN  # Seoul
+      - NRT  # Tokyo
+      - BKK  # Bangkok
+      - SIN  # Singapore
+      - HAN  # Hanoi
+    kafka_topic: topic_external_flights
+    target_layer: bronze
+    target_path: s3://bronze/external/flights/
+    retention_days: 30
+    
+  # Open Tourism Datasets
+  open_datasets:
+    enabled: true
+    source_type: file_download
+    ingestion_method: airflow_batch
+    sources:
+      - name: vietnam_tourism_stats
+        url: https://data.gov.vn/tourism/statistics.csv
+        format: csv
+        schedule: "0 0 1 * *"  # Monthly
+      - name: world_tourism_org
+        url: https://www.unwto.org/data/download/latest.json
+        format: json
+        schedule: "0 0 1 * *"  # Monthly
+    target_layer: bronze
+    target_path: s3://bronze/external/open_datasets/
+    retention_days: 730  # 2 years
+
+# ═══════════════════════════════════════════════════════════════
+# DATA QUALITY RULES
+# ═══════════════════════════════════════════════════════════════
+data_quality:
+  
+  # Schema Validation
+  schema_validation:
+    enforce: true
+    fail_on_error: false
+    log_invalid_records: true
+    
+  # Duplicate Detection
+  duplicate_detection:
+    enabled: true
+    dedup_keys:
+      app_events: [event_id]
+      bookings: [booking_id]
+      clickstream: [session_id, timestamp, page_url]
+    dedup_window: 3600  # seconds
+    
+  # Timestamp Verification
+  timestamp_checks:
+    enabled: true
+    max_future_offset: 300  # 5 minutes
+    max_past_offset: 86400  # 24 hours
+    
+  # Data Completeness
+  completeness_checks:
+    required_fields_not_null: true
+    min_record_count_per_partition: 100
+
+# ═══════════════════════════════════════════════════════════════
+# KAFKA TOPICS CONFIGURATION
+# ═══════════════════════════════════════════════════════════════
+kafka_topics:
+  defaults:
+    partitions: 12
+    replication_factor: 3
+    retention_ms: 604800000  # 7 days
+    compression_type: snappy
+    
+  custom:
+    topic_bookings:
+      partitions: 24
+      retention_ms: 2592000000  # 30 days
+      compression_type: lz4
+    topic_app_logs:
+      partitions: 6
+      retention_ms: 86400000  # 1 day
+      compression_type: gzip
+
+# ═══════════════════════════════════════════════════════════════
+# MONITORING & ALERTING
+# ═══════════════════════════════════════════════════════════════
+monitoring:
+  
+  # Metrics Collection
+  prometheus:
+    enabled: true
+    scrape_interval: 15s
+    metrics:
+      - kafka_consumer_lag
+      - records_processed_per_second
+      - data_quality_failures
+      - api_request_latency
+      
+  # Alerts
+  alerts:
+    - name: high_consumer_lag
+      condition: kafka_consumer_lag > 10000
+      severity: warning
+      channels: [slack, email]
+    - name: data_quality_failure_rate
+      condition: data_quality_failures > 5%
+      severity: critical
+      channels: [pagerduty, slack]
+    - name: external_api_down
+      condition: api_success_rate < 95%
+      severity: warning
+      channels: [slack]

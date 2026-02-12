@@ -3,3 +3,8 @@ clickhouse-connect
 kafka-python
 pyspark
 psycopg2-binary
+
+# Schema Registry & DLQ (HA Features)
+confluent-kafka[avro]==2.3.0
+avro-python3==1.10.2
+fastavro==1.9.4

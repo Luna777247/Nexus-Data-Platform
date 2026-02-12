@@ -1,0 +1,167 @@
+# ═══════════════════════════════════════════════════════════════
+# Prometheus Configuration - Nexus Data Platform
+# ═══════════════════════════════════════════════════════════════
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'nexus-data-platform'
+    environment: 'production'
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # ═══════════════════════════════════════════════════════════════
+  # Prometheus self-monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ═══════════════════════════════════════════════════════════════
+  # Kafka Cluster Monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'kafka-cluster'
+    static_configs:
+      - targets: 
+          - 'kafka-exporter:9308'
+        labels:
+          cluster: 'kafka'
+          service: 'messaging'
+  
+  # Kafka JMX Metrics (per broker)
+  - job_name: 'kafka-brokers'
+    static_configs:
+      - targets:
+          - 'kafka-1:9101'
+          - 'kafka-2:9102'
+          - 'kafka-3:9103'
+        labels:
+          cluster: 'kafka'
+          service: 'messaging'
+
+  # ═══════════════════════════════════════════════════════════════
+  # Spark Streaming Cluster Monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'spark-streaming'
+    metrics_path: '/metrics/prometheus'
+    static_configs:
+      - targets:
+          - 'spark-stream-master:8080'
+        labels:
+          cluster: 'spark-streaming'
+          service: 'processing'
+          role: 'master'
+      - targets:
+          - 'spark-stream-worker-1:8081'
+          - 'spark-stream-worker-2:8081'
+        labels:
+          cluster: 'spark-streaming'
+          service: 'processing'
+          role: 'worker'
+  
+  # ═══════════════════════════════════════════════════════════════
+  # Spark Batch Cluster Monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'spark-batch'
+    metrics_path: '/metrics/prometheus'
+    static_configs:
+      - targets:
+          - 'spark-batch-master:8081'
+        labels:
+          cluster: 'spark-batch'
+          service: 'processing'
+          role: 'master'
+      - targets:
+          - 'spark-batch-worker-1:8081'
+          - 'spark-batch-worker-2:8081'
+        labels:
+          cluster: 'spark-batch'
+          service: 'processing'
+          role: 'worker'
+
+  # ═══════════════════════════════════════════════════════════════
+  # PostgreSQL Database Monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'postgresql'
+    static_configs:
+      - targets:
+          - 'postgres-exporter:9187'
+        labels:
+          cluster: 'postgresql'
+          service: 'database'
+
+  # ═══════════════════════════════════════════════════════════════
+  # MinIO Object Storage Monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'minio'
+    metrics_path: /minio/v2/metrics/cluster
+    scheme: http
+    static_configs:
+      - targets:
+          - 'minio-1:9000'
+        labels:
+          cluster: 'minio'
+          service: 'object-storage'
+
+  # ═══════════════════════════════════════════════════════════════
+  # Airflow Monitoring (if statsd exporter enabled)
+  # ═══════════════════════════════════════════════════════════════
+  # - job_name: 'airflow'
+  #   static_configs:
+  #     - targets:
+  #         - 'airflow-statsd-exporter:9102'
+  #       labels:
+  #         service: 'orchestration'
+
+  # ═══════════════════════════════════════════════════════════════
+  # ClickHouse Monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'clickhouse'
+    static_configs:
+      - targets:
+          - 'clickhouse:9363'
+        labels:
+          service: 'analytics'
+
+  # ═══════════════════════════════════════════════════════════════
+  # Redis Monitoring (requires redis_exporter)
+  # ═══════════════════════════════════════════════════════════════
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets:
+  #         - 'redis-exporter:9121'
+  #       labels:
+  #         service: 'cache'
+
+  # ═══════════════════════════════════════════════════════════════
+  # Elasticsearch Monitoring
+  # ═══════════════════════════════════════════════════════════════
+  # - job_name: 'elasticsearch'
+  #   static_configs:
+  #     - targets:
+  #         - 'elasticsearch-exporter:9114'
+  #       labels:
+  #         service: 'search'
+
+  # ═══════════════════════════════════════════════════════════════
+  # Trino Monitoring
+  # ═══════════════════════════════════════════════════════════════
+  - job_name: 'trino'
+    metrics_path: '/v1/metrics'
+    static_configs:
+      - targets:
+          - 'trino:8080'
+        labels:
+          service: 'query-engine'

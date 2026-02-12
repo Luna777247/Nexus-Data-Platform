@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Spark Structured Streaming Job - Extensible Kafka Ingestion
+Spark Structured Streaming Job - Kafka to Bronze Layer
 Location: spark/kafka_streaming_job.py
 
 Purpose:
 - Subscribe to all Kafka topics matching pattern: topic_*
-- No code changes needed when adding new sources
-- Stream → Validate → Write to Iceberg lakehouse
+- Real-time streaming ingestion
+- Write to 🥉 Bronze Layer (Raw Data)
+- Partitioned by date and hour for efficient queries
+
+Architecture:
+    Kafka Topics → Spark Streaming → Bronze Layer (Parquet/Iceberg)
 """
 
 from pyspark.sql import SparkSession
@@ -49,14 +53,14 @@ logger.info("✅ Spark Session initialized with Iceberg support")
 # ============================================
 
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-KAFKA_SUBSCRIBE_PATTERN = "topic_.*"  # Matches: topic_user_events, topic_booking_events, etc.
-ICEBERG_NAMESPACE = "tourism_db"
-CHECKPOINT_LOCATION = "s3a://iceberg-warehouse/_checkpoints/kafka_stream"
+KAFKA_SUBSCRIBE_PATTERN = "topic_.*"  # Matches: topic_app_events, topic_cdc_changes, etc.
+BRONZE_BUCKET = "s3a://bronze"
+CHECKPOINT_LOCATION = "s3a://bronze/_checkpoints/kafka_stream"
 
-logger.info(f"📡 Kafka Configuration:")
+logger.info(f"📡 Kafka to Bronze Configuration:")
 logger.info(f"   Bootstrap Servers: {KAFKA_BOOTSTRAP_SERVERS}")
 logger.info(f"   Subscribe Pattern: {KAFKA_SUBSCRIBE_PATTERN}")
-logger.info(f"   Iceberg Namespace: {ICEBERG_NAMESPACE}")
+logger.info(f"   Bronze Layer: {BRONZE_BUCKET}")
 
 # ============================================
 # Define Kafka Message Schema
@@ -132,13 +136,16 @@ df_validated = df_parsed \
     )
 
 # ============================================
-# Write to Iceberg (Streaming)
+# Write to Bronze Layer (Streaming)
 # ============================================
 
-def write_stream_to_iceberg(micro_batch_df, batch_id):
+def write_stream_to_bronze(micro_batch_df, batch_id):
     """
-    Write microBatch to Iceberg table
-    Called for each Kafka micro-batch
+    Write microBatch to Bronze Layer in Parquet format
+    Partitioned by: date, hour, source
+    
+    Bronze Layer Structure:
+        s3a://bronze/{source_type}/date={date}/hour={hour}/
     """
     
     if micro_batch_df.rdd.isEmpty():
@@ -147,44 +154,44 @@ def write_stream_to_iceberg(micro_batch_df, batch_id):
     
     try:
         record_count = micro_batch_df.count()
-        logger.info(f"💾 Writing batch {batch_id}: {record_count} records")
+        logger.info(f"💾 Writing batch {batch_id}: {record_count} records to Bronze")
         
-        # Create table if not exists, append if exists
-        micro_batch_df \
+        # Add partitioning columns
+        df_with_partitions = micro_batch_df \
+            .withColumn("ingestion_date", to_date(col("processed_timestamp"))) \
+            .withColumn("ingestion_hour", hour(col("processed_timestamp")))
+        
+        # Determine source type from kafka topic
+        # topic_app_events -> app_events
+        # topic_cdc_changes -> cdc_changes
+        df_with_source = df_with_partitions \
+            .withColumn("source_type", 
+                       expr("regexp_replace(kafka_topic, '^topic_', '')"))
+        
+        # Write to Bronze partitioned by source, date, hour
+        df_with_source \
             .select(
-                col("kafka_topic"),
-                col("source_id"),
-                col("source_name"),
-                col("partition"),
-                col("offset"),
-                col("kafka_timestamp"),
-                col("ingestion_timestamp"),
-                col("processed_timestamp"),
-                col("raw_data"),
-                col("is_valid"),
-                col("quality_score"),
+                "kafka_topic",
+                "source_id",
+                "source_name",
+                "partition",
+                "offset",
+                "kafka_timestamp",
+                "ingestion_timestamp",
+                "processed_timestamp",
+                "raw_data",
+                "is_valid",
+                "quality_score",
+                "source_type",
+                "ingestion_date",
+                "ingestion_hour"
             ) \
-            .writeTo(f"{ICEBERG_NAMESPACE}.kafka_events_raw") \
-            .append()
+            .write \
+            .mode("append") \
+            .partitionBy("source_type", "ingestion_date", "ingestion_hour") \
+            .parquet(f"{BRONZE_BUCKET}/kafka_events")
         
-        # Partition by processing date
-        logger.info(f"✅ Batch {batch_id}: {record_count} records written to Iceberg")
-        
-        # Also write to summary table (aggregated)
-        summary_df = micro_batch_df.groupBy("source_id", "source_name") \
-            .agg(
-                {"raw_data": "count"},
-                {"quality_score": "avg"},
-                {"kafka_topic": "first"}
-            )
-        
-        summary_df \
-            .withColumns({
-                "processed_date": current_timestamp(),
-                "batch_id": lit(str(batch_id))
-            }) \
-            .writeTo(f"{ICEBERG_NAMESPACE}.kafka_events_summary") \
-            .append()
+        logger.info(f"✅ Batch {batch_id}: {record_count} records written to Bronze Layer")
         
     except Exception as e:
         logger.error(f"❌ Error writing batch {batch_id}: {e}")
@@ -196,21 +203,20 @@ def write_stream_to_iceberg(micro_batch_df, batch_id):
 
 query = df_validated \
     .writeStream \
-    .format("iceberg") \
-    .option("path", f"s3a://iceberg-warehouse/{ICEBERG_NAMESPACE}/kafka_events_raw") \
+    .outputMode("append") \
     .option("checkpointLocation", CHECKPOINT_LOCATION) \
     .trigger(processingTime="10 seconds") \
-    .option("mergeSchema", "true") \
-    .foreachBatch(write_stream_to_iceberg) \
+    .foreachBatch(write_stream_to_bronze) \
     .start()
 
 logger.info("\n" + "="*60)
-logger.info("🚀 KAFKA STREAMING JOB STARTED")
+logger.info("🚀 KAFKA → BRONZE STREAMING JOB STARTED")
 logger.info("="*60)
 logger.info(f"Listening to topics matching: {KAFKA_SUBSCRIBE_PATTERN}")
-logger.info(f"Writing to Iceberg table: {ICEBERG_NAMESPACE}.kafka_events_raw")
+logger.info(f"Writing to Bronze Layer: {BRONZE_BUCKET}")
 logger.info(f"Checkpoint location: {CHECKPOINT_LOCATION}")
 logger.info(f"Batch interval: 10 seconds")
+logger.info(f"Partitioning: source_type/date/hour")
 logger.info("="*60 + "\n")
 
 # ============================================
