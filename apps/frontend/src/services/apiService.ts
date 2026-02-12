@@ -5,7 +5,39 @@
 
 import { TravelLocation, WarehouseRecord } from 'shared/types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = (import.meta.env.VITE_API_URL || '').trim();
+
+const buildApiUrl = (path: string, params?: Record<string, string>) => {
+  const base = API_BASE_URL;
+  const url = `${base}${path}`;
+  if (!params) {
+    return url;
+  }
+  return `${url}?${new URLSearchParams(params)}`;
+};
+
+// Debug logging
+console.log('🔧 API Service initialized with BASE_URL:', API_BASE_URL);
+console.log('🔧 Environment VITE_API_URL:', import.meta.env.VITE_API_URL);
+
+export interface DataSourcePayload {
+  source_id: string;
+  source_name: string;
+  source_type: string;
+  location: string;
+  enabled?: boolean;
+  kafka_topic?: string;
+  target_table?: string;
+  schedule_interval?: string;
+  category?: string;
+  method?: string;
+  auth_type?: string;
+  format?: string;
+  required_fields?: string[];
+  [key: string]: any;
+}
+
+export type DataSourceUpdate = Partial<DataSourcePayload>;
 
 /**
  * Check API health status
@@ -26,6 +58,78 @@ export async function checkApiHealth(): Promise<{ status: string; services: any 
         cache: '❌ Unavailable'
       }
     };
+  }
+}
+
+// ============================================
+// DATA SOURCES API
+// ============================================
+
+export async function getDataSources(enabled?: boolean): Promise<DataSourcePayload[]> {
+  try {
+    const url = buildApiUrl(
+      '/api/v1/data-sources',
+      enabled !== undefined ? { enabled: String(enabled) } : undefined
+    );
+
+    console.log('🔍 Fetching data sources from:', url);
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      console.error('❌ API Response Error:', response.status, response.statusText);
+      throw new Error(`Failed to fetch data sources: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    console.log('✅ Data sources loaded:', data);
+    return data.data || [];
+  } catch (error) {
+    console.error('❌ getDataSources error:', error);
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
+    throw error;
+  }
+}
+
+export async function createDataSource(payload: DataSourcePayload): Promise<DataSourcePayload> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/data-sources`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create data source: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.data;
+}
+
+export async function updateDataSource(sourceId: string, payload: DataSourceUpdate): Promise<DataSourcePayload> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/data-sources/${sourceId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update data source: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.data;
+}
+
+export async function deleteDataSource(sourceId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/data-sources/${sourceId}`, {
+    method: 'DELETE'
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete data source: ${response.statusText}`);
   }
 }
 

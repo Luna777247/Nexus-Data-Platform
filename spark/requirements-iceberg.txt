@@ -1,0 +1,24 @@
+# Spark requirements with Iceberg support
+# Install: pip install -r requirements.txt
+
+pyspark==3.5.0
+pyarrow==14.0.0
+
+# Iceberg support (automatically pulled via Spark packages in PySpark)
+# But we can add Python libraries for Iceberg support:
+pyiceberg==0.6.0  # Python library for Iceberg operations
+iceberg-python==0.6.0  # Additional tools
+
+# AWS SDK for S3 operations
+boto3==1.28.0
+botocore==1.31.0
+
+# Data processing
+pandas==2.1.0
+numpy==1.24.0
+
+# Utilities
+pyyaml==6.0
+requests==2.31.0
+python-json-logger==2.0.4
+python-dotenv==1.0.0

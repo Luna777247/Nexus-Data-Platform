@@ -1,0 +1,138 @@
+global:
+  data_lake_bucket: data-lake-v2
+  warehouse_bucket: iceberg-warehouse
+  kafka_bootstrap_servers: kafka:29092
+  default_partition_by: ingestion_date
+  new_setting: test_value
+sources:
+- format: json
+  method: GET
+  enabled: true
+  location: https://api.tourism.io/v1/events
+  auth_type: bearer
+  source_id: user_events_api
+  batch_size: 1000
+  start_date: '2024-01-01'
+  kafka_topic: topic_user_events
+  schema_file: packages/shared/schemas/user_events.schema.json
+  source_name: Tourism User Events
+  source_type: api
+  partition_by: event_date
+  target_table: bronze_user_events
+  target_schema: iceberg
+  retention_days: 365
+  required_fields:
+  - id
+  - user_id
+  - event_type
+  - timestamp
+  target_database: tourism_db
+  transformations:
+  - name: add_ingestion_date
+    type: timestamp
+    target_column: ingestion_date
+  - name: lowercase_region
+    type: lower
+    column: region
+  - name: validate_amount
+    type: filter
+    condition: amount >= 0
+  schedule_interval: '@daily'
+  archive_after_days: 90
+- format: json
+  method: GET
+  enabled: true
+  location: https://api.tourism.io/v1/bookings
+  auth_type: api_key
+  source_id: booking_events_api
+  batch_size: 500
+  start_date: '2024-01-01'
+  kafka_topic: topic_booking_events
+  schema_file: packages/shared/schemas/booking_events.schema.json
+  source_name: Tourism Booking Events
+  source_type: api
+  partition_by: created_date
+  target_table: bronze_booking_events
+  api_key_header: X-API-Key
+  retention_days: 730
+  required_fields:
+  - booking_id
+  - user_id
+  - amount
+  - created_at
+  target_database: tourism_db
+  transformations:
+  - name: add_ingestion_date
+    type: timestamp
+    target_column: ingestion_date
+  - name: round_amount
+    type: round
+    column: amount
+    places: 2
+  schedule_interval: '@daily'
+- format: json
+  method: GET
+  enabled: true
+  location: https://api.openweather.io/data/2.5/forecast
+  auth_type: api_key
+  source_id: weather_api
+  batch_size: 100
+  start_date: '2024-01-01'
+  kafka_topic: topic_weather_api
+  schema_file: packages/shared/schemas/weather.schema.json
+  source_name: OpenWeather Data
+  source_type: api
+  partition_by: forecast_date
+  target_table: bronze_weather
+  retention_days: 365
+  required_fields:
+  - location
+  - temperature
+  - timestamp
+  target_database: tourism_db
+  schedule_interval: '@daily'
+- query: SELECT * FROM accommodations WHERE updated_at > ?
+  format: jdbc
+  enabled: true
+  jdbc_url: jdbc:postgresql://accommodation-db:5432/accommodations
+  jdbc_user: etl_user
+  source_id: accommodation_db
+  start_date: '2024-01-01'
+  jdbc_driver: org.postgresql.Driver
+  kafka_topic: topic_accommodation_db
+  schema_file: packages/shared/schemas/accommodation.schema.json
+  source_name: Accommodation Database
+  source_type: jdbc
+  partition_by: updated_at
+  source_table: accommodations
+  target_table: bronze_accommodation
+  jdbc_password: ${ACCOMMODATION_DB_PASSWORD}
+  retention_days: 730
+  required_fields:
+  - accommodation_id
+  - name
+  - location
+  target_database: tourism_db
+  watermark_column: updated_at
+  schedule_interval: '@hourly'
+- format: json
+  method: GET
+  enabled: false
+  location: https://api.payment-provider.io/v1/transactions
+  auth_type: oauth
+  source_id: payment_events_api
+  batch_size: 1000
+  start_date: '2024-01-01'
+  kafka_topic: topic_payment_events
+  schema_file: packages/shared/schemas/payment_events.schema.json
+  source_name: Payment Events
+  source_type: api
+  partition_by: transaction_date
+  target_table: bronze_payment_events
+  retention_days: 2555
+  required_fields:
+  - transaction_id
+  - amount
+  - status
+  target_database: tourism_db
+  schedule_interval: '@hourly'

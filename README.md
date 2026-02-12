@@ -50,7 +50,7 @@ kubectl -n nexus-data-platform get pods
 | ClickHouse | http://localhost:8123 | - |
 | FastAPI Docs | http://localhost:8000/docs | - |
 
-Full setup guide: **[SETUP_COMPLETE.md](./SETUP_COMPLETE.md)**
+Full setup guide: **[DOCS.md](./DOCS.md)**
 
 ---
 
@@ -90,7 +90,7 @@ Test API:
 curl http://localhost:8000/api/v1/tours?region=VN
 ```
 
-**Full examples:** [SETUP_COMPLETE.md](./SETUP_COMPLETE.md)
+**Full examples:** [DOCS.md](./DOCS.md)
 
 ---
 

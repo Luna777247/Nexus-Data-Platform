@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
 
 export const generateHybridRecommendations = async () => {
   try {
@@ -87,5 +87,79 @@ export const generateSyntheticData = async (count: number = 20) => {
     return JSON.parse(response.text);
   } catch (error) {
     return [];
+  }
+};
+
+/**
+ * Generate data source configuration using AI
+ * User provides basic info, AI generates optimal config
+ */
+export const generateDataSourceConfig = async (basicInfo: {
+  source_id: string;
+  source_name: string;
+  location: string;
+  category: 'application' | 'database' | 'streaming' | 'external';
+  source_type?: string;
+}) => {
+  try {
+    const prompt = `You are a Data Engineering expert. Generate optimal configuration for a data source with these details:
+
+Source ID: ${basicInfo.source_id}
+Source Name: ${basicInfo.source_name}
+Location/URL: ${basicInfo.location}
+Category: ${basicInfo.category}
+${basicInfo.source_type ? `Type: ${basicInfo.source_type}` : ''}
+
+Based on the URL/location pattern and category, intelligently suggest:
+1. kafka_topic: Kafka topic name (format: topic_<source_type>_<context>)
+2. target_table: Target table name (format: bronze_<entity>)
+3. schedule_interval: Cron or preset (@hourly, @daily, etc) based on data freshness needs
+4. method: HTTP method if API (GET, POST, etc)
+5. auth_type: Authentication type (bearer, api_key, oauth, none)
+6. format: Data format (json, xml, csv, parquet)
+7. required_fields: Array of critical fields that must exist (infer from source type)
+8. description: Brief description of what this source provides
+9. batch_size: Optimal batch size for extraction (100-5000)
+10. retention_days: Data retention period (30-730 days)
+
+Follow best practices for data engineering and ETL patterns.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            kafka_topic: { type: Type.STRING },
+            target_table: { type: Type.STRING },
+            schedule_interval: { type: Type.STRING },
+            method: { type: Type.STRING },
+            auth_type: { type: Type.STRING },
+            format: { type: Type.STRING },
+            required_fields: { 
+              type: Type.ARRAY, 
+              items: { type: Type.STRING } 
+            },
+            description: { type: Type.STRING },
+            batch_size: { type: Type.INTEGER },
+            retention_days: { type: Type.INTEGER }
+          },
+          required: [
+            "kafka_topic", 
+            "target_table", 
+            "schedule_interval", 
+            "format", 
+            "description"
+          ]
+        }
+      }
+    });
+
+    return JSON.parse(response.text);
+  } catch (error) {
+    console.error("AI Config Generation Error:", error);
+    throw new Error("Failed to generate AI configuration");
   }
 };

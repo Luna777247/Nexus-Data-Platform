@@ -3,16 +3,30 @@ Nexus Data Platform - FastAPI Endpoints
 REST & GraphQL API for tourism data serving
 """
 
+from dotenv import load_dotenv
+import os
+
+# Load .env.local if exists (for local dev outside Docker)
+env_local_path = os.path.join(os.path.dirname(__file__), ".env.local")
+if os.path.exists(env_local_path):
+    load_dotenv(env_local_path)
+    print(f"✅ Loaded environment from {env_local_path}")
+
 from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict
 import redis
 import json
-import os
+import yaml
+import psycopg2
+from psycopg2.extras import RealDictCursor, Json
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import logging
 from datetime import datetime
+from kafka import KafkaProducer
+from kafka.errors import KafkaError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,6 +49,16 @@ TOUR_SCHEMA_FIELDS = _load_schema_fields(
     TOUR_SCHEMA_PATH,
     ["id", "name", "region", "price", "rating", "tags"]
 )
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DEFAULT_SOURCES_PATH = os.path.join(REPO_ROOT, "conf", "sources.yaml")
+SOURCES_PATH = os.getenv("CONFIG_SOURCES_PATH", DEFAULT_SOURCES_PATH)
+
+DATA_SOURCES_DB_HOST = os.getenv("DATA_SOURCES_DB_HOST", "postgres")
+DATA_SOURCES_DB_PORT = int(os.getenv("DATA_SOURCES_DB_PORT", "5432"))
+DATA_SOURCES_DB_USER = os.getenv("DATA_SOURCES_DB_USER", "admin")
+DATA_SOURCES_DB_PASSWORD = os.getenv("DATA_SOURCES_DB_PASSWORD", "admin123")
+DATA_SOURCES_DB_NAME = os.getenv("DATA_SOURCES_DB_NAME", "nexus_data")
 
 # ============================================
 # Initialize FastAPI App
@@ -72,6 +96,26 @@ try:
 except Exception as e:
     logger.warning(f"⚠️  Could not connect to Redis: {e}")
     cache = None
+
+# ============================================
+# Initialize Kafka Producer
+# ============================================
+
+kafka_producer = None
+try:
+    kafka_producer = KafkaProducer(
+        bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092").split(","),
+        value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+        acks='all',  # Wait for all replicas
+        retries=3,
+        max_in_flight_requests_per_connection=1,  # Ensure ordering
+    )
+    # Test connection
+    kafka_producer.send("topic_user_events", value={"test": "connection"}).get(timeout=5)
+    logger.info("✅ Connected to Kafka at " + os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"))
+except Exception as e:
+    logger.warning(f"⚠️  Could not connect to Kafka: {e}")
+    kafka_producer = None
 
 # ============================================
 # Data Models
@@ -116,6 +160,174 @@ SAMPLE_EVENTS = [
     {"id": "e2", "user_id": 102, "tour_id": "t2", "event_type": "view", "amount": 0, "region": "VN"},
     {"id": "e3", "user_id": 103, "tour_id": "t4", "event_type": "booking", "amount": 79.99, "region": "SG"},
 ]
+
+# ============================================
+# Data Sources Storage
+# ============================================
+
+class DataSourceCreate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    source_id: str
+    source_name: str
+    source_type: str
+    location: str
+    enabled: bool = True
+    kafka_topic: Optional[str] = None
+    target_table: Optional[str] = None
+    schedule_interval: Optional[str] = None
+    category: Optional[str] = None
+    method: Optional[str] = None
+    auth_type: Optional[str] = None
+    format: Optional[str] = None
+    required_fields: Optional[List[str]] = None
+
+
+class DataSourceUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    source_name: Optional[str] = None
+    source_type: Optional[str] = None
+    location: Optional[str] = None
+    enabled: Optional[bool] = None
+    kafka_topic: Optional[str] = None
+    target_table: Optional[str] = None
+    schedule_interval: Optional[str] = None
+    category: Optional[str] = None
+    method: Optional[str] = None
+    auth_type: Optional[str] = None
+    format: Optional[str] = None
+    required_fields: Optional[List[str]] = None
+
+
+class GlobalConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+
+def _get_db_connection():
+    return psycopg2.connect(
+        host=DATA_SOURCES_DB_HOST,
+        port=DATA_SOURCES_DB_PORT,
+        user=DATA_SOURCES_DB_USER,
+        password=DATA_SOURCES_DB_PASSWORD,
+        dbname=DATA_SOURCES_DB_NAME,
+    )
+
+
+def _ensure_data_sources_table():
+    create_sql = """
+        CREATE TABLE IF NOT EXISTS data_sources (
+            source_id TEXT PRIMARY KEY,
+            source_name TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            config JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """
+    with _get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(create_sql)
+
+
+def _normalize_source_payload(payload: Dict) -> Dict:
+    normalized = dict(payload)
+    source_id = normalized.get("source_id")
+    if source_id:
+        normalized.setdefault("kafka_topic", f"topic_{source_id}")
+        normalized.setdefault("target_table", f"bronze_{source_id}")
+    normalized.setdefault("schedule_interval", "@daily")
+    normalized.setdefault("enabled", True)
+    return normalized
+
+
+def _row_to_source(row: Dict) -> Dict:
+    source = dict(row.get("config") or {})
+    source.setdefault("source_id", row.get("source_id"))
+    source.setdefault("source_name", row.get("source_name"))
+    source.setdefault("source_type", row.get("source_type"))
+    source.setdefault("enabled", row.get("enabled"))
+    return source
+
+
+def _fetch_sources_from_db(enabled_only: Optional[bool] = None) -> List[Dict]:
+    query = "SELECT source_id, source_name, source_type, enabled, config FROM data_sources"
+    params = []
+    if enabled_only is True:
+        query += " WHERE enabled = TRUE"
+    elif enabled_only is False:
+        query += " WHERE enabled = FALSE"
+
+    with _get_db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+    return [_row_to_source(row) for row in rows]
+
+
+def _load_yaml_global_config() -> Dict:
+    if not os.path.exists(SOURCES_PATH):
+        return {}
+    try:
+        with open(SOURCES_PATH, "r") as yaml_file:
+            config = yaml.safe_load(yaml_file) or {}
+        return config.get("global", {})
+    except Exception as exc:
+        logger.warning(f"Could not load global config from YAML: {exc}")
+        return {}
+
+
+def _write_sources_yaml_with_global(sources: List[Dict], global_config: Dict):
+    payload = {
+        "global": global_config,
+        "sources": sources,
+    }
+    os.makedirs(os.path.dirname(SOURCES_PATH), exist_ok=True)
+    with open(SOURCES_PATH, "w") as yaml_file:
+        yaml.safe_dump(payload, yaml_file, sort_keys=False)
+
+
+def _write_sources_yaml(sources: List[Dict]):
+    global_config = _load_yaml_global_config()
+    _write_sources_yaml_with_global(sources, global_config)
+
+
+def _seed_sources_from_yaml():
+    if not os.path.exists(SOURCES_PATH):
+        return
+    try:
+        with open(SOURCES_PATH, "r") as yaml_file:
+            config = yaml.safe_load(yaml_file) or {}
+    except Exception as exc:
+        logger.warning(f"Could not read YAML sources for seeding: {exc}")
+        return
+
+    sources = config.get("sources", [])
+    if not sources:
+        return
+
+    with _get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM data_sources")
+            count = cursor.fetchone()[0]
+            if count > 0:
+                return
+
+            insert_sql = """
+                INSERT INTO data_sources (source_id, source_name, source_type, enabled, config)
+                VALUES (%s, %s, %s, %s, %s)
+            """
+            for source in sources:
+                normalized = _normalize_source_payload(source)
+                cursor.execute(
+                    insert_sql,
+                    (
+                        normalized.get("source_id"),
+                        normalized.get("source_name"),
+                        normalized.get("source_type"),
+                        normalized.get("enabled", True),
+                        Json(normalized),
+                    ),
+                )
 
 # ============================================
 # Helper Functions
@@ -198,6 +410,175 @@ async def get_metrics():
     set_to_cache(cache_key, metrics, ttl=3600)
     
     return metrics
+
+# ============================================
+# DATA SOURCES ENDPOINTS
+# ============================================
+
+@app.get("/api/v1/data-sources", tags=["Data Sources"])
+async def list_data_sources(enabled: Optional[bool] = None):
+    try:
+        sources = _fetch_sources_from_db(enabled_only=enabled)
+    except Exception as exc:
+        logger.error(f"Failed to load data sources: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to load data sources")
+    return {"data": sources, "count": len(sources)}
+
+
+@app.post("/api/v1/data-sources", tags=["Data Sources"])
+async def create_data_source(payload: DataSourceCreate):
+    source = _normalize_source_payload(payload.model_dump(exclude_none=True))
+    insert_sql = """
+        INSERT INTO data_sources (source_id, source_name, source_type, enabled, config)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    try:
+        with _get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    insert_sql,
+                    (
+                        source["source_id"],
+                        source["source_name"],
+                        source["source_type"],
+                        source.get("enabled", True),
+                        Json(source),
+                    ),
+                )
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(status_code=409, detail="Source already exists")
+    except Exception as exc:
+        logger.error(f"Failed to create data source: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to create data source")
+
+    try:
+        _write_sources_yaml(_fetch_sources_from_db())
+    except Exception as exc:
+        logger.warning(f"Failed to export sources to YAML: {exc}")
+
+    return {"status": "success", "data": source}
+
+
+# ============================================
+# GLOBAL CONFIG ENDPOINTS (must be before /{source_id} routes)
+# ============================================
+
+@app.get("/api/v1/data-sources/global", tags=["Data Sources"])
+async def get_global_config():
+    return {"global": _load_yaml_global_config()}
+
+
+@app.put("/api/v1/data-sources/global", tags=["Data Sources"])
+async def update_global_config(payload: GlobalConfigUpdate):
+    update_data = payload.model_dump(exclude_none=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update fields provided")
+
+    global_config = _load_yaml_global_config()
+    global_config.update(update_data)
+
+    try:
+        sources = _fetch_sources_from_db()
+        _write_sources_yaml_with_global(sources, global_config)
+    except Exception as exc:
+        logger.error(f"Failed to update global config: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to update global config")
+
+    return {"status": "success", "global": global_config}
+
+
+@app.post("/api/v1/data-sources/export", tags=["Data Sources"])
+async def export_data_sources(include_content: bool = False):
+    try:
+        sources = _fetch_sources_from_db()
+        _write_sources_yaml(sources)
+    except Exception as exc:
+        logger.error(f"Failed to export sources: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to export sources")
+
+    response = {
+        "status": "success",
+        "path": SOURCES_PATH,
+        "count": len(sources),
+    }
+
+    if include_content:
+        try:
+            with open(SOURCES_PATH, "r") as yaml_file:
+                response["content"] = yaml_file.read()
+        except Exception as exc:
+            logger.warning(f"Failed to read exported YAML: {exc}")
+
+    return response
+
+
+# ============================================
+# DATA SOURCE CRUD WITH DYNAMIC PATH (must be after /global routes)
+# ============================================
+
+@app.put("/api/v1/data-sources/{source_id}", tags=["Data Sources"])
+async def update_data_source(source_id: str, payload: DataSourceUpdate):
+    update_data = payload.model_dump(exclude_none=True)
+    update_data.pop("source_id", None)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update fields provided")
+
+    with _get_db_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                "SELECT source_id, source_name, source_type, enabled, config FROM data_sources WHERE source_id = %s",
+                (source_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Source not found")
+
+            current = _row_to_source(row)
+            current.update(update_data)
+            normalized = _normalize_source_payload(current)
+
+            cursor.execute(
+                """
+                UPDATE data_sources
+                SET source_name = %s,
+                    source_type = %s,
+                    enabled = %s,
+                    config = %s,
+                    updated_at = NOW()
+                WHERE source_id = %s
+                """,
+                (
+                    normalized.get("source_name"),
+                    normalized.get("source_type"),
+                    normalized.get("enabled", True),
+                    Json(normalized),
+                    source_id,
+                ),
+            )
+
+    try:
+        _write_sources_yaml(_fetch_sources_from_db())
+    except Exception as exc:
+        logger.warning(f"Failed to export sources to YAML: {exc}")
+
+    return {"status": "success", "data": normalized}
+
+
+@app.delete("/api/v1/data-sources/{source_id}", tags=["Data Sources"])
+async def delete_data_source(source_id: str):
+    with _get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM data_sources WHERE source_id = %s", (source_id,))
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Source not found")
+
+    try:
+        _write_sources_yaml(_fetch_sources_from_db())
+    except Exception as exc:
+        logger.warning(f"Failed to export sources to YAML: {exc}")
+
+    return {"status": "success", "source_id": source_id}
+
 
 # ============================================
 # TOURS ENDPOINTS
@@ -432,14 +813,37 @@ async def create_event(event_data: dict, background_tasks: BackgroundTasks):
     
     logger.info(f"Recording event: {event_data}")
     
-    # In production, send to Kafka
-    # producer.send('tourism_events', value=event_data)
-    
     new_event = {
         'id': f"e_{len(SAMPLE_EVENTS) + 1}",
         'timestamp': datetime.now().isoformat(),
         **event_data
     }
+    
+    # Send to Kafka (async, non-blocking)
+    if kafka_producer:
+        try:
+            # Determine topic based on event type
+            event_type = event_data.get('event_type', 'unknown')
+            if event_type == 'booking':
+                topic = 'topic_booking_events'
+            else:
+                topic = 'topic_user_events'
+            
+            future = kafka_producer.send(topic, value=new_event)
+            
+            def log_kafka_result(metadata):
+                logger.info(f"Event sent to Kafka - Topic: {metadata.topic}, Partition: {metadata.partition}, Offset: {metadata.offset}")
+            
+            def log_kafka_error(exc):
+                logger.error(f"Failed to send event to Kafka: {exc}")
+            
+            future.add_callback(log_kafka_result)
+            future.add_errback(log_kafka_error)
+            
+        except KafkaError as e:
+            logger.error(f"Kafka error: {e}")
+    else:
+        logger.warning("Kafka producer not available, event recorded locally only")
     
     SAMPLE_EVENTS.append(new_event)
     
@@ -451,7 +855,8 @@ async def create_event(event_data: dict, background_tasks: BackgroundTasks):
     return {
         'status': 'success',
         'event_id': new_event['id'],
-        'timestamp': new_event['timestamp']
+        'timestamp': new_event['timestamp'],
+        'kafka_sent': kafka_producer is not None
     }
 
 # ============================================
@@ -539,6 +944,12 @@ async def startup_event():
     logger.info("✅ API is ready")
     logger.info(f"   OpenAPI Docs: http://localhost:8000/docs")
     logger.info(f"   ReDoc: http://localhost:8000/redoc")
+    try:
+        _ensure_data_sources_table()
+        _seed_sources_from_yaml()
+        logger.info("✅ Data sources table is ready")
+    except Exception as exc:
+        logger.warning(f"⚠️  Data sources storage not ready: {exc}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

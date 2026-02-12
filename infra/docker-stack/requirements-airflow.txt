@@ -1,0 +1,5 @@
+boto3
+clickhouse-connect
+kafka-python
+pyspark
+psycopg2-binary

@@ -36,6 +36,16 @@ data:
     connection-url=jdbc:postgresql://postgres:5432/nexus_data
     connection-user=admin
     connection-password=admin123
+  iceberg.properties: |
+    connector.name=iceberg
+    iceberg.catalog.type=rest
+    iceberg.catalog.uri=http://iceberg-rest:8080
+    iceberg.s3.endpoint=http://minio:9000
+    iceberg.s3.access-key=minioadmin
+    iceberg.s3.secret-key=minioadmin123
+    iceberg.s3.path-style-access=true
+    iceberg.s3.region=us-east-1
+    iceberg.warehouse=s3://iceberg-warehouse/
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -329,6 +339,78 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: iceberg-rest
+  namespace: nexus-data-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iceberg-rest
+  template:
+    metadata:
+      labels:
+        app: iceberg-rest
+    spec:
+      containers:
+        - name: iceberg-rest
+          image: tabulario/iceberg-rest:latest
+          ports:
+            - containerPort: 8080
+          env:
+            # Catalog configuration
+            - name: CATALOG_WAREHOUSE
+              value: "s3://iceberg-warehouse/"
+            - name: CATALOG_S3_ENDPOINT
+              value: "http://minio:9000"
+            - name: CATALOG_S3_ACCESS_KEY_ID
+              value: "minioadmin"
+            - name: CATALOG_S3_SECRET_ACCESS_KEY
+              value: "minioadmin123"
+            - name: CATALOG_S3_PATH_STYLE_ACCESS
+              value: "true"
+            - name: CATALOG_S3_REGION
+              value: "us-east-1"
+            # Metadata backend (PostgreSQL)
+            - name: CATALOG_JDBC_URL
+              value: "jdbc:postgresql://postgres:5432/nexus_iceberg"
+            - name: CATALOG_JDBC_USER
+              value: "admin"
+            - name: CATALOG_JDBC_PASSWORD
+              value: "admin123"
+            # REST Server settings
+            - name: SERVER_PORT
+              value: "8080"
+            - name: LOG_LEVEL
+              value: "INFO"
+          livenessProbe:
+            httpGet:
+              path: /v1/config
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /v1/config
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iceberg-rest
+  namespace: nexus-data-platform
+spec:
+  selector:
+    app: iceberg-rest
+  ports:
+    - name: http
+      port: 8182
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: trino
   namespace: nexus-data-platform
 spec:
@@ -359,6 +441,9 @@ spec:
             - name: trino-catalog
               mountPath: /etc/trino/catalog/postgresql.properties
               subPath: postgresql.properties
+            - name: trino-catalog
+              mountPath: /etc/trino/catalog/iceberg.properties
+              subPath: iceberg.properties
       volumes:
         - name: trino-config
           configMap:

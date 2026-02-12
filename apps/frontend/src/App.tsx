@@ -10,6 +10,7 @@ import {
 import { 
   getRecommendations, getTours, getRegionalStats, checkApiHealth, convertTourToTravelLocation, convertStatsToWarehouseRecord
 } from './services/apiService';
+import DataSourceManager from './components/DataSourceManager';
 import { 
   LayoutDashboard, Plug, Calendar, PlayCircle, BarChart3, 
   Database, Map as MapIcon, Settings, Brain, Search, 
@@ -224,6 +225,7 @@ const App: React.FC = () => {
             <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Orchestration</p>
             <SidebarItem id="airflow" icon={Server} label="Airflow DAGs" />
             <SidebarItem id="schedules" icon={Calendar} label="Auto-Schedules" />
+            <SidebarItem id="data_sources" icon={FileCode} label="Data Sources" />
             <SidebarItem id="explorer" icon={Search} label="Data Explorer" />
           </div>
 
@@ -444,7 +446,10 @@ const App: React.FC = () => {
                    <h2 className="text-3xl font-black">Data Ingestion Hub</h2>
                    <p className="text-slate-500">Configured API clusters for real-time tourism extraction.</p>
                 </div>
-                <button className="bg-blue-600 text-white px-8 py-3.5 rounded-2xl font-black text-sm shadow-xl shadow-blue-500/20 flex items-center space-x-3 active:scale-95 transition-all">
+                <button 
+                  onClick={() => setActiveTab('data_sources')}
+                  className="bg-blue-600 text-white px-8 py-3.5 rounded-2xl font-black text-sm shadow-xl shadow-blue-500/20 flex items-center space-x-3 active:scale-95 transition-all hover:bg-blue-500 cursor-pointer"
+                >
                   <Plus size={18} /><span>ADD NEW SOURCE</span>
                 </button>
               </div>
@@ -760,6 +765,13 @@ const App: React.FC = () => {
                   <button className="w-full bg-teal-600 hover:bg-teal-500 text-white py-3 rounded-2xl font-black text-sm transition-all active:scale-95">Open Atlas</button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Data Sources Management */}
+          {activeTab === 'data_sources' && (
+            <div className="max-w-7xl mx-auto animate-in fade-in duration-500">
+              <DataSourceManager />
             </div>
           )}
 

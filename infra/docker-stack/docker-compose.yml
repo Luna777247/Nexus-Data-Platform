@@ -68,7 +68,41 @@ services:
       retries: 3
 
   # ============================================
-  # 3. SQL QUERY ENGINE - Trino
+  # 3. TABLE FORMAT & METADATA CATALOG - Iceberg
+  # ============================================
+  iceberg-rest:
+    image: tabulario/iceberg-rest:latest
+    container_name: nexus-iceberg-rest
+    depends_on:
+      - postgres
+      - minio
+    ports:
+      - "8182:8080"
+    networks:
+      - nexus_network
+    environment:
+      # Catalog configuration
+      CATALOG_WAREHOUSE: s3://iceberg-warehouse/
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_ACCESS_KEY_ID: minioadmin
+      CATALOG_S3_SECRET_ACCESS_KEY: minioadmin123
+      CATALOG_S3_PATH_STYLE_ACCESS: "true"
+      CATALOG_S3_REGION: us-east-1
+      # Metadata backend (PostgreSQL)
+      CATALOG_JDBC_URL: jdbc:postgresql://postgres:5432/nexus_iceberg
+      CATALOG_JDBC_USER: admin
+      CATALOG_JDBC_PASSWORD: admin123
+      # REST Server settings
+      SERVER_PORT: 8080
+      LOG_LEVEL: INFO
+    healthcheck:
+      test: curl -f http://localhost:8080/v1/config || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # 4. SQL QUERY ENGINE - Trino
   # ============================================
   trino:
     image: trinodb/trino:latest
@@ -171,6 +205,7 @@ services:
       - nexus_network
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init-iceberg.sql:/docker-entrypoint-initdb.d/03-iceberg.sql
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin123
@@ -185,7 +220,10 @@ services:
   # 8. ORCHESTRATION - Airflow (Webserver)
   # ============================================
   airflow-webserver:
-    image: apache/airflow:2.7.0-python3.11
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    image: nexus-airflow:2.7.0
     container_name: nexus-airflow-webserver
     depends_on:
       - postgres
@@ -195,6 +233,10 @@ services:
       - nexus_network
     volumes:
       - ../../pipelines/airflow/dags:/opt/airflow/dags
+      - ../../pipelines/airflow/utils:/opt/airflow/utils
+      - ../../jobs/spark:/opt/airflow/jobs
+      - ../../packages:/opt/airflow/packages
+      - ../../conf:/opt/airflow/conf
     environment:
       AIRFLOW_UID: 50000
       AIRFLOW_UID_GID: 50000
@@ -204,6 +246,26 @@ services:
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       AIRFLOW__WEBSERVER__SECRET_KEY: nexus_secret_key_2024
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin123
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: data-lake
+      S3_REGION: us-east-1
+      S3_PATH_STYLE: "true"
+      EVENT_SCHEMA_PATH: /opt/airflow/packages/shared/schemas/event.schema.json
+      CONFIG_SOURCES_PATH: /opt/airflow/conf/sources.yaml
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      DATA_SOURCES_DB_HOST: postgres
+      DATA_SOURCES_DB_PORT: "5432"
+      DATA_SOURCES_DB_USER: admin
+      DATA_SOURCES_DB_PASSWORD: admin123
+      DATA_SOURCES_DB_NAME: nexus_data
+      DATA_SOURCES_DB_ENABLED: "true"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: admin123
+      CLICKHOUSE_DATABASE: analytics
     command: webserver
     healthcheck:
       test: curl -f http://localhost:8080/health || exit 1
@@ -215,7 +277,10 @@ services:
   # 9. ORCHESTRATION - Airflow (Scheduler)
   # ============================================
   airflow-scheduler:
-    image: apache/airflow:2.7.0-python3.11
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    image: nexus-airflow:2.7.0
     container_name: nexus-airflow-scheduler
     depends_on:
       - postgres
@@ -224,6 +289,10 @@ services:
       - nexus_network
     volumes:
       - ../../pipelines/airflow/dags:/opt/airflow/dags
+      - ../../pipelines/airflow/utils:/opt/airflow/utils
+      - ../../jobs/spark:/opt/airflow/jobs
+      - ../../packages:/opt/airflow/packages
+      - ../../conf:/opt/airflow/conf
     environment:
       AIRFLOW_UID: 50000
       AIRFLOW_UID_GID: 50000
@@ -231,6 +300,26 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin123
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: data-lake
+      S3_REGION: us-east-1
+      S3_PATH_STYLE: "true"
+      EVENT_SCHEMA_PATH: /opt/airflow/packages/shared/schemas/event.schema.json
+      CONFIG_SOURCES_PATH: /opt/airflow/conf/sources.yaml
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      DATA_SOURCES_DB_HOST: postgres
+      DATA_SOURCES_DB_PORT: "5432"
+      DATA_SOURCES_DB_USER: admin
+      DATA_SOURCES_DB_PASSWORD: admin123
+      DATA_SOURCES_DB_NAME: nexus_data
+      DATA_SOURCES_DB_ENABLED: "true"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: admin123
+      CLICKHOUSE_DATABASE: analytics
     command: scheduler
     healthcheck:
       test: airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"

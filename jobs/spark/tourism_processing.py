@@ -5,11 +5,12 @@ Transform raw tourism data and generate recommendations
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, when, avg, count, sum as spark_sum, 
+    col, when, avg, count, sum as spark_sum,
     window, explode, split, regexp_extract, year, month, dayofmonth, lit, current_timestamp
 )
 from pyspark.sql.types import StructType, StructField, StringType, FloatType, IntegerType, TimestampType, DoubleType
 from datetime import datetime
+import argparse
 import json
 import os
 import logging
@@ -21,11 +22,23 @@ logger = logging.getLogger(__name__)
 # Initialize Spark Session
 # ============================================
 
+parser = argparse.ArgumentParser(description="Nexus Tourism Spark Processing")
+parser.add_argument("--input", dest="input_path", default=os.getenv("RAW_INPUT_PATH"))
+parser.add_argument("--output", dest="output_path", default=os.getenv("PROCESSED_OUTPUT_PATH"))
+args = parser.parse_args()
+
+input_path = args.input_path or "s3a://data-lake/raw/tourism/*/events.json"
+output_path = args.output_path or f"s3a://data-lake/processed/tourism/events/{datetime.now().strftime('%Y/%m/%d')}/"
+
+s3_endpoint = os.getenv("S3_ENDPOINT", "http://minio:9000")
+s3_access_key = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+s3_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin123")
+
 spark = SparkSession.builder \
     .appName("NexusTourismProcessing") \
-    .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
-    .config("spark.hadoop.fs.s3a.secret.key", "minioadmin123") \
-    .config("spark.hadoop.fs.s3a.endpoint", "http://localhost:9000") \
+    .config("spark.hadoop.fs.s3a.access.key", s3_access_key) \
+    .config("spark.hadoop.fs.s3a.secret.key", s3_secret_key) \
+    .config("spark.hadoop.fs.s3a.endpoint", s3_endpoint) \
     .config("spark.hadoop.fs.s3a.path.style.access", "true") \
     .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
     .config("spark.sql.adaptive.enabled", "true") \
@@ -40,8 +53,11 @@ logger.info("✅ Spark Session initialized")
 # Define Schema (shared contract)
 # ============================================
 
-SCHEMA_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "packages", "shared", "schemas", "event.schema.json")
+SCHEMA_PATH = os.getenv(
+    "EVENT_SCHEMA_PATH",
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "packages", "shared", "schemas", "event.schema.json")
+    ),
 )
 
 def _json_schema_to_spark(schema: dict) -> StructType:
@@ -82,26 +98,27 @@ event_schema = _load_event_schema()
 # ============================================
 
 logger.info("Reading raw tourism events data...")
+logger.info(f"Input path: {input_path}")
 
-# In production, read from MinIO
-# df_raw = spark.read.json("s3a://data-lake/raw/tourism/*/events.json")
+df_raw = spark.read.json(input_path)
 
-# For demo, create sample data
-sample_events = [
-    ("1", 101, "booking", 999.99, "VN", "api"),
-    ("2", 102, "view", 0.0, "SG", "web"),
-    ("3", 103, "booking", 1999.99, "TH", "mobile"),
-    ("4", 104, "review", 0.0, "ID", "web"),
-    ("5", 105, "booking", 499.99, "VN", "api"),
-    ("6", 106, "click", 0.0, "SG", "mobile"),
-    ("7", 107, "booking", 1499.99, "TH", "api"),
-    ("8", 108, "view", 0.0, "ID", "web"),
-]
+if 'records' in df_raw.columns:
+    df_events = df_raw.select(
+        col('source').alias('source_name'),
+        explode(col('records')).alias('record')
+    ).select(
+        col('record.id').alias('id'),
+        col('record.user_id').cast('int').alias('user_id'),
+        col('record.event_type').alias('event_type'),
+        col('record.amount').cast('double').alias('amount'),
+        col('record.region').alias('region'),
+        col('record.source').alias('source')
+    )
+else:
+    df_events = df_raw
 
-df_raw = spark.createDataFrame(sample_events, schema=event_schema)
-
-logger.info(f"✅ Loaded {df_raw.count()} raw events")
-df_raw.show(5)
+df_events = df_events.filter(col('id').isNotNull())
+logger.info(f"✅ Loaded {df_events.count()} raw events")
 
 # ============================================
 # 2. DATA CLEANING
@@ -109,7 +126,7 @@ df_raw.show(5)
 
 logger.info("Cleaning and transforming data...")
 
-df_clean = df_raw \
+df_clean = df_events \
     .dropna(subset=['user_id', 'event_type']) \
     .filter(col('amount') >= 0) \
     .withColumn('event_date', current_timestamp()) \
@@ -191,35 +208,13 @@ for metric, value in quality_metrics.items():
 # 6. WRITE RESULTS TO CLICKHOUSE
 # ============================================
 
-logger.info("Writing processed data to ClickHouse...")
+logger.info("Writing processed data to MinIO...")
 
-# Configure ClickHouse connection
-clickhouse_jdbc_url = "jdbc:clickhouse://localhost:8123"
-clickhouse_user = "admin"
-clickhouse_password = "admin123"
+df_clean.coalesce(1).write \
+    .mode("overwrite") \
+    .json(output_path)
 
-try:
-    # Write regional metrics
-    df_regional.write \
-        .format("clickhouse") \
-        .mode("append") \
-        .option("url", clickhouse_jdbc_url) \
-        .option("user", clickhouse_user) \
-        .option("password", clickhouse_password) \
-        .option("dbtable", "analytics.regional_metrics") \
-        .save()
-    
-    logger.info("✅ Regional metrics written to ClickHouse")
-except Exception as e:
-    logger.warning(f"⚠️  Could not write to ClickHouse: {e}")
-    logger.info("Writing to Parquet instead...")
-    
-    # Fallback: write to Parquet in MinIO
-    df_regional.coalesce(1).write \
-        .mode("overwrite") \
-        .parquet(f"s3a://data-lake/processed/regional_metrics/{datetime.now().strftime('%Y/%m/%d')}/")
-    
-    logger.info("✅ Regional metrics written to Parquet")
+logger.info(f"✅ Processed events written to {output_path}")
 
 # ============================================
 # 7. SAVE RECOMMENDATIONS
@@ -234,7 +229,6 @@ df_recommendations = df_user_metrics.join(
 ) \
     .withColumn('match_score', col('match_score') * 0.75)  # Weight recommendations
 
-# Write to Parquet
 df_recommendations.coalesce(1).write \
     .mode("overwrite") \
     .parquet(f"s3a://data-lake/processed/recommendations/{datetime.now().strftime('%Y/%m/%d')}/")
@@ -252,8 +246,9 @@ logger.info(f"Processing Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 logger.info(f"Total Events Processed: {df_clean.count()}")
 logger.info(f"Unique Users: {quality_metrics['unique_users']}")
 logger.info(f"Regions: {quality_metrics['regions']}")
-logger.info(f"Total Revenue: ${df_clean.agg(spark_sum('amount')).collect()[0][0]:.2f}")
-logger.info(f"Output Location: s3://data-lake/processed/{datetime.now().strftime('%Y/%m/%d')}/")
+total_revenue = df_clean.agg(spark_sum('amount')).collect()[0][0] or 0.0
+logger.info(f"Total Revenue: ${total_revenue:.2f}")
+logger.info(f"Output Location: {output_path}")
 logger.info("=" * 50)
 
 spark.stop()
