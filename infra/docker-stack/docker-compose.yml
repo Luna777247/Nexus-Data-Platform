@@ -442,8 +442,8 @@ services:
     image: nexus-api
     container_name: nexus-api
     build:
-      context: ../../..
-      dockerfile: apps/api/Dockerfile
+      context: ../../apps/api
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     networks:
@@ -463,8 +463,8 @@ services:
     image: nexus-ui
     container_name: nexus-ui
     build:
-      context: ../../..
-      dockerfile: apps/ui/Dockerfile
+      context: ../../apps/ui
+      dockerfile: Dockerfile
     ports:
       - "3000:80"
     networks:
