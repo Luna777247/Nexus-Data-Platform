@@ -1,0 +1,185 @@
+Kiến trúc React UI
+Frontend Framework: React 18 (TypeScript)
+State Management: Redux Toolkit (hoặc Zustand)
+UI Library: MUI (Material-UI) hoặc Ant Design
+Routing: React Router v6
+API Integration: Axios (REST), WebSocket (real-time)
+Authentication: JWT (tích hợp với RBAC backend)
+Role-based Access: Hiển thị menu, dashboard, chức năng theo vai trò (Admin, Data Engineer, Analyst, Viewer)
+Theming: Dark/Light mode, branding
+2. Các màn hình chính
+Dashboard tổng quan: Metrics, alerts, trạng thái pipeline
+Data Explorer: Xem dữ liệu Bronze/Silver/Gold, filter, export
+Analytics & BI: Truy vấn ClickHouse, Superset embed (iframe)
+Log & Search: Tích hợp Elasticsearch/Kibana (iframe hoặc API)
+Quality & Lineage: Hiển thị kết quả kiểm tra chất lượng, lineage (OpenMetadata)
+Monitoring: Embed Grafana dashboards, Prometheus metrics
+User Management: Quản lý tài khoản, phân quyền, audit logs
+Settings: Cấu hình API endpoints, theme, notification
+3. Tích hợp Backend
+API Gateway: Gọi FastAPI endpoints (/health, /metrics, /ingest, /search)
+WebSocket: Nhận real-time events (pipeline status, alerts)
+Superset: Embed dashboard qua iframe hoặc API
+Elasticsearch: Tìm kiếm logs, dữ liệu tourism
+Redis: Sử dụng cho caching client-side nếu cần
+4. Triển khai Docker
+Dockerfile: Multi-stage build (Node 18, production static)
+docker-compose: Thêm service react-ui:
+5. Security & Best Practices
+RBAC: Kiểm tra JWT, phân quyền UI
+HTTPS: Hỗ trợ reverse proxy/nginx
+Audit Logging: Ghi lại thao tác người dùng
+Error Handling: Thông báo lỗi rõ ràng, retry logic
+6. Tài liệu & Hướng dẫn
+README.md: Hướng dẫn build, deploy, cấu hình
+Sample .env: API endpoints, Superset, Elasticsearch, Grafana
+CI/CD: Github Actions hoặc Gitlab CI (build, test, deploy)
+7. Tích hợp với Compliance Report
+Khi triển khai xong, cập nhật:
+Thêm evidence: Dockerfile, cấu hình, screenshots, test coverage
+
+Chi tiết từng màn hình React UI cho Nexus Data Platform:
+
+1. Dashboard Tổng Quan
+Chức năng: Hiển thị trạng thái hệ thống, pipeline, alert, metrics.
+Thành phần:
+Tổng số sự kiện, job, lỗi, cảnh báo.
+Biểu đồ pipeline (dạng flow/step).
+Bảng trạng thái các service (Kafka, Spark, MinIO, API, Superset).
+Thông báo real-time (WebSocket).
+2. Data Explorer
+Chức năng: Duyệt dữ liệu Bronze/Silver/Gold, filter, export.
+Thành phần:
+Chọn layer (Bronze/Silver/Gold).
+Bảng dữ liệu với filter, sort, pagination.
+Export CSV/Excel.
+Xem schema, metadata, lineage (OpenMetadata).
+Tìm kiếm theo trường (Elasticsearch).
+3. Analytics & BI
+Chức năng: Truy vấn ClickHouse, Superset embed.
+Thành phần:
+Form truy vấn SQL (ClickHouse).
+Hiển thị kết quả dạng bảng, chart.
+Embed Superset dashboard (iframe/API).
+Lưu query, lịch sử truy vấn.
+4. Log & Search
+Chức năng: Tìm kiếm log, sự kiện, lỗi.
+Thành phần:
+Form tìm kiếm (KQL/DSL).
+Bảng log với filter theo service, level, thời gian.
+Biểu đồ lỗi theo thời gian.
+Embed Kibana dashboard (iframe/API).
+5. Quality & Lineage
+Chức năng: Hiển thị kết quả kiểm tra chất lượng, lineage.
+Thành phần:
+Bảng quality check (completeness, uniqueness, range, freshness).
+Biểu đồ chất lượng theo pipeline/job.
+Lineage graph (dạng cây hoặc flow).
+Export lineage (JSON/Graphviz).
+6. Monitoring
+Chức năng: Quan sát metrics, alert, dashboard.
+Thành phần:
+Embed Grafana dashboard (iframe/API).
+Bảng alert Prometheus.
+Biểu đồ metrics (CPU, RAM, Disk, Kafka lag, Spark jobs).
+Lịch sử alert, acknowledge.
+7. User Management
+Chức năng: Quản lý tài khoản, phân quyền, audit logs.
+Thành phần:
+Bảng user, role, permission.
+Form tạo/sửa user, phân quyền.
+Xem audit logs (lịch sử thao tác).
+Đổi mật khẩu, xác thực 2 lớp.
+8. Settings
+Chức năng: Cấu hình endpoint, theme, notification.
+Thành phần:
+Form cấu hình API, Superset, Elasticsearch, Grafana.
+Chọn theme (dark/light).
+Cấu hình notification (email, Slack).
+Test connection, lưu cấu hình.
+9. Authentication & RBAC
+Chức năng: Đăng nhập, đăng xuất, xác thực JWT.
+Thành phần:
+Form login, logout.
+Hiển thị menu theo role.
+Bảo vệ route (PrivateRoute).
+Thông báo lỗi xác thực.
+
+Kế hoạch code lần lượt UI React cho Nexus Data Platform:
+
+1. Khởi tạo project & cấu hình nền tảng
+
+Scaffold React 18 + TypeScript (Vite/CRA)
+Cài đặt Redux Toolkit, React Router, MUI/Ant Design, Axios, WebSocket
+Thiết lập cấu trúc thư mục: pages, components, store, services, utils, assets
+Tạo file cấu hình .env (API endpoints, Superset, Elasticsearch, Grafana)
+2. Authentication & RBAC
+
+Xây dựng màn hình Login/Logout
+Tích hợp JWT, lưu token (localStorage)
+Bảo vệ route (PrivateRoute)
+Hiển thị menu theo role
+Xử lý lỗi xác thực
+3. Dashboard Tổng Quan
+
+Tạo page Dashboard
+Hiển thị metrics, trạng thái pipeline, alert
+Biểu đồ pipeline (flow/step)
+Bảng trạng thái các service
+Thông báo real-time (WebSocket)
+4. Data Explorer
+
+Tạo page DataExplorer
+Chọn layer (Bronze/Silver/Gold)
+Bảng dữ liệu với filter, sort, pagination
+Export CSV/Excel
+Xem schema, metadata, lineage (OpenMetadata)
+Tìm kiếm theo trường (Elasticsearch)
+5. Analytics & BI
+
+Tạo page Analytics
+Form truy vấn SQL (ClickHouse)
+Hiển thị kết quả dạng bảng, chart
+Embed Superset dashboard (iframe/API)
+Lưu query, lịch sử truy vấn
+6. Log & Search
+
+Tạo page LogSearch
+Form tìm kiếm (KQL/DSL)
+Bảng log với filter theo service, level, thời gian
+Biểu đồ lỗi theo thời gian
+Embed Kibana dashboard (iframe/API)
+7. Quality & Lineage
+
+Tạo page QualityLineage
+Bảng quality check (completeness, uniqueness, range, freshness)
+Biểu đồ chất lượng theo pipeline/job
+Lineage graph (dạng cây/flow)
+Export lineage (JSON/Graphviz)
+8. Monitoring
+
+Tạo page Monitoring
+Embed Grafana dashboard (iframe/API)
+Bảng alert Prometheus
+Biểu đồ metrics (CPU, RAM, Disk, Kafka lag, Spark jobs)
+Lịch sử alert, acknowledge
+9. User Management
+
+Tạo page UserManagement
+Bảng user, role, permission
+Form tạo/sửa user, phân quyền
+Xem audit logs
+Đổi mật khẩu, xác thực 2 lớp
+10. Settings
+
+Tạo page Settings
+Form cấu hình API, Superset, Elasticsearch, Grafana
+Chọn theme (dark/light)
+Cấu hình notification (email, Slack)
+Test connection, lưu cấu hình
+11. Hoàn thiện, kiểm thử, tài liệu
+
+Viết README.md hướng dẫn build, deploy, cấu hình
+Tích hợp CI/CD (Github Actions/Gitlab CI)
+Test coverage từng page/component
+Chụp screenshot, cập nhật compliance report

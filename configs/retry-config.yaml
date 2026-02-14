@@ -1,0 +1,198 @@
+# Retry Configuration for Nexus Data Platform
+# Defines retry strategies and circuit breaker settings for different services
+
+# ============================================
+# Kafka Configuration
+# ============================================
+kafka:
+  producer:
+    max_attempts: 5
+    initial_delay: 1.0
+    max_delay: 30.0
+    exponential_base: 2.0
+    strategy: "exponential"
+    
+  consumer:
+    max_attempts: 3
+    initial_delay: 2.0
+    max_delay: 60.0
+    strategy: "exponential"
+  
+  circuit_breaker:
+    failure_threshold: 10
+    success_threshold: 3
+    timeout: 90  # seconds
+
+# ============================================
+# Spark Job Configuration
+# ============================================
+spark:
+  job_submission:
+    max_attempts: 5
+    initial_delay: 5.0
+    max_delay: 300.0
+    strategy: "exponential"
+  
+  read_operations:
+    max_attempts: 3
+    initial_delay: 1.0
+    max_delay: 30.0
+    strategy: "exponential"
+  
+  write_operations:
+    max_attempts: 5
+    initial_delay: 2.0
+    max_delay: 60.0
+    strategy: "exponential"
+  
+  circuit_breaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 120
+
+# ============================================
+# Database Configuration
+# ============================================
+database:
+  postgresql:
+    max_attempts: 3
+    initial_delay: 0.5
+    max_delay: 10.0
+    strategy: "exponential"
+    
+  clickhouse:
+    max_attempts: 3
+    initial_delay: 1.0
+    max_delay: 20.0
+    strategy: "exponential"
+  
+  circuit_breaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 60
+
+# ============================================
+# Object Storage Configuration (MinIO/S3)
+# ============================================
+storage:
+  read:
+    max_attempts: 3
+    initial_delay: 1.0
+    max_delay: 30.0
+    strategy: "exponential"
+  
+  write:
+    max_attempts: 5
+    initial_delay: 2.0
+    max_delay: 60.0
+    strategy: "exponential"
+  
+  circuit_breaker:
+    failure_threshold: 10
+    success_threshold: 3
+    timeout: 120
+
+# ============================================
+# External API Configuration
+# ============================================
+external_api:
+  default:
+    max_attempts: 3
+    initial_delay: 2.0
+    max_delay: 60.0
+    strategy: "exponential"
+  
+  weather_api:
+    max_attempts: 5
+    initial_delay: 1.0
+    max_delay: 30.0
+    strategy: "exponential"
+  
+  maps_api:
+    max_attempts: 3
+    initial_delay: 1.0
+    max_delay: 20.0
+    strategy: "exponential"
+  
+  circuit_breaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 180
+
+# ============================================
+# Cache Configuration (Redis)
+# ============================================
+cache:
+  operations:
+    max_attempts: 2
+    initial_delay: 0.5
+    max_delay: 5.0
+    strategy: "fixed"
+  
+  circuit_breaker:
+    failure_threshold: 10
+    success_threshold: 3
+    timeout: 30
+
+# ============================================
+# Monitoring Services Configuration
+# ============================================
+monitoring:
+  prometheus:
+    max_attempts: 2
+    initial_delay: 1.0
+    max_delay: 10.0
+    strategy: "fixed"
+  
+  jaeger:
+    max_attempts: 2
+    initial_delay: 0.5
+    max_delay: 5.0
+    strategy: "fixed"
+
+# ============================================
+# Data Quality Checks
+# ============================================
+data_quality:
+  checks:
+    max_attempts: 2
+    initial_delay: 5.0
+    max_delay: 30.0
+    strategy: "linear"
+  
+  circuit_breaker:
+    failure_threshold: 3
+    success_threshold: 2
+    timeout: 300
+
+# ============================================
+# Airflow DAG Tasks
+# ============================================
+airflow:
+  task_retry:
+    max_attempts: 3
+    initial_delay: 60.0  # 1 minute
+    max_delay: 600.0  # 10 minutes
+    strategy: "exponential"
+  
+  sensor_retry:
+    max_attempts: 10
+    initial_delay: 30.0
+    max_delay: 300.0
+    strategy: "linear"
+
+# ============================================
+# Default Fallback Configuration
+# ============================================
+default:
+  max_attempts: 3
+  initial_delay: 1.0
+  max_delay: 30.0
+  exponential_base: 2.0
+  strategy: "exponential"
+  jitter: true
+  
+  circuit_breaker:
+    failure_threshold: 5
+    success_threshold: 2
+    timeout: 60

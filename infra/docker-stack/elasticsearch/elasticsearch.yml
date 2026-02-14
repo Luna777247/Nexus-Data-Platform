@@ -1,0 +1,83 @@
+# Elasticsearch Configuration for Nexus Data Platform
+# Version: 8.11.0
+
+# ========================================
+# CLUSTER
+# ========================================
+cluster.name: nexus-cluster
+node.name: nexus-es-node
+
+# Node roles
+node.roles: [ master, data, ingest, ml ]
+
+# ========================================
+# PATHS
+# ========================================
+path.data: /usr/share/elasticsearch/data
+path.logs: /usr/share/elasticsearch/logs
+
+# ========================================
+# NETWORK
+# ========================================
+network.host: 0.0.0.0
+http.port: 9200
+transport.port: 9300
+
+# ========================================
+# DISCOVERY
+# ========================================
+discovery.type: single-node
+
+# For production with multiple nodes, use:
+# discovery.seed_hosts: ["es-node1", "es-node2", "es-node3"]
+# cluster.initial_master_nodes: ["nexus-es-node"]
+
+# ========================================
+# SECURITY
+# ========================================
+# Disabled for development. Enable in production!
+xpack.security.enabled: false
+xpack.security.enrollment.enabled: false
+xpack.security.http.ssl.enabled: false
+xpack.security.transport.ssl.enabled: false
+
+# For production, enable security:
+# xpack.security.enabled: true
+# xpack.security.http.ssl.enabled: true
+# xpack.security.transport.ssl.enabled: true
+
+# ========================================
+# MONITORING
+# ========================================
+xpack.monitoring.collection.enabled: true
+
+# ========================================
+# MACHINE LEARNING
+# ========================================
+xpack.ml.enabled: true
+
+# ========================================
+# INDEX SETTINGS
+# ========================================
+# Default number of shards
+action.auto_create_index: true
+indices.query.bool.max_clause_count: 4096
+
+# ========================================
+# PERFORMANCE
+# ========================================
+# Thread pools
+thread_pool.write.queue_size: 1000
+thread_pool.search.queue_size: 1000
+
+# Circuit breakers
+indices.breaker.total.limit: 70%
+indices.breaker.request.limit: 40%
+indices.breaker.fielddata.limit: 40%
+
+# ========================================
+# LOGGING
+# ========================================
+logger.level: INFO
+logger.org.elasticsearch.discovery: WARN
+logger.org.elasticsearch.cluster.service: INFO

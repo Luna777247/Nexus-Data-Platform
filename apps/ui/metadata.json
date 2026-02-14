@@ -1,0 +1,8 @@
+{
+  "name": "Nexus Data Platform",
+  "description": "A comprehensive enterprise-grade data management platform featuring pipeline monitoring, data exploration across Medallion layers (Bronze/Silver/Gold), analytics integration with ClickHouse and Superset, and robust RBAC security.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

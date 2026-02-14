@@ -18,7 +18,7 @@ alerting:
 
 # Load rules once and periodically evaluate them
 rule_files:
-  # - "alerts/*.yml"
+  - "/etc/prometheus/alert-rules.yml"
 
 # Scrape configurations
 scrape_configs:
@@ -47,6 +47,8 @@ scrape_configs:
           - 'kafka-1:9101'
           - 'kafka-2:9102'
           - 'kafka-3:9103'
+          - 'kafka-4:9104'
+          - 'kafka-5:9105'
         labels:
           cluster: 'kafka'
           service: 'messaging'

@@ -1,9 +1,0 @@
-fastapi==0.104.1
-httpx==0.25.2
-pytest==7.4.3
-pytest-asyncio==0.21.1
-redis==5.0.1
-
-# Schema Registry & DLQ (HA Features)
-confluent-kafka[avro]==2.3.0
-avro-python3==1.10.2

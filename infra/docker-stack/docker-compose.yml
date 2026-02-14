@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   # ============================================
@@ -155,7 +155,7 @@ services:
   # 5. SEARCH ENGINE - Elasticsearch
   # ============================================
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
     container_name: nexus-elasticsearch
     ports:
       - "9200:9200"
@@ -209,7 +209,7 @@ services:
     environment:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin123
-      POSTGRES_DB: nexus_data
+      POSTGRES_DB: admin
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin"]
       interval: 30s
@@ -223,7 +223,7 @@ services:
     build:
       context: .
       dockerfile: airflow.Dockerfile
-    image: nexus-airflow:2.7.0
+    image: nexus-airflow-webserver:2.7.0
     container_name: nexus-airflow-webserver
     depends_on:
       - postgres
@@ -280,7 +280,7 @@ services:
     build:
       context: .
       dockerfile: airflow.Dockerfile
-    image: nexus-airflow:2.7.0
+    image: nexus-airflow-scheduler:2.7.0
     container_name: nexus-airflow-scheduler
     depends_on:
       - postgres
@@ -361,6 +361,118 @@ services:
       timeout: 10s
       retries: 3
 
+  # ============================================
+  # 11. REVERSE PROXY - Nginx
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: nexus-nginx
+    depends_on:
+      - api
+      - ui
+      - superset
+      - grafana
+      - kibana
+    ports:
+      - "80:80"
+    networks:
+      - nexus_network
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: always
+
+  # ============================================
+  # 12. MONITORING - Grafana
+  # ============================================
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: nexus-grafana
+    ports:
+      - "3001:3000"
+    networks:
+      - nexus_network
+    volumes:
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001/grafana/
+    depends_on:
+      - prometheus
+    restart: always
+
+  # ============================================
+  # 13. MONITORING - Prometheus
+  # ============================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nexus-prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - nexus_network
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml
+      - prometheus_data:/prometheus
+    restart: always
+
+  # ============================================
+  # 14. LOG & SEARCH - Kibana
+  # ============================================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: nexus-kibana
+    ports:
+      - "5601:5601"
+    networks:
+      - nexus_network
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    restart: always
+
+  # ============================================
+  # 15. API BACKEND - FastAPI
+  # ============================================
+  api:
+    image: nexus-api
+    container_name: nexus-api
+    build:
+      context: ../../..
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8000:8000"
+    networks:
+      - nexus_network
+    environment:
+      - ENV_FILE=.env
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    restart: always
+
+  # ============================================
+  # 16. FRONTEND UI - React
+  # ============================================
+  ui:
+    image: nexus-ui
+    container_name: nexus-ui
+    build:
+      context: ../../..
+      dockerfile: apps/ui/Dockerfile
+    ports:
+      - "3000:80"
+    networks:
+      - nexus_network
+    environment:
+      - ENV_FILE=.env
+    restart: always
+
 networks:
   nexus_network:
     driver: bridge
@@ -372,3 +484,5 @@ volumes:
   redis_data:
   postgres_data:
   superset_data:
+  grafana_data:
+  prometheus_data:

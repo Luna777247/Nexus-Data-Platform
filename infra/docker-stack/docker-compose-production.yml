@@ -7,6 +7,8 @@ volumes:
   kafka_1_data: null
   kafka_2_data: null
   kafka_3_data: null
+  kafka_4_data: null
+  kafka_5_data: null
   postgres_data: null
   minio_1_data: null
   minio_2_data: null
@@ -17,6 +19,13 @@ volumes:
   openmetadata_data: null
   spark_stream_data: null
   spark_batch_data: null
+  jaeger_data: null
+  superset_data: null
+  superset_postgres_data: null
+  elasticsearch_data: null
+  kibana_data: null
+  redis_data: null
+  redis_sentinel_data: null
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -155,6 +164,83 @@ services:
         reservations:
           memory: 1.5G
           cpus: '0.5'
+  
+  kafka-4:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-4
+    depends_on:
+    - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 4
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-4:29095,PLAINTEXT_HOST://localhost:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_JMX_PORT: 9104
+      KAFKA_JMX_HOSTNAME: kafka-4
+    ports:
+    - 9095:9095
+    - 9104:9104
+    networks:
+    - nexus_network
+    volumes:
+    - kafka_4_data:/var/lib/kafka/data
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:9095
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1.5G
+          cpus: '0.5'
+  
+  kafka-5:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: nexus-kafka-5
+    depends_on:
+    - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 5
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-5:29096,PLAINTEXT_HOST://localhost:9096
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_JMX_PORT: 9105
+      KAFKA_JMX_HOSTNAME: kafka-5
+    ports:
+    - 9096:9096
+    - 9105:9105
+    networks:
+    - nexus_network
+    volumes:
+    - kafka_5_data:/var/lib/kafka/data
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:9096
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1'
+        reservations:
+          memory: 1.5G
+          cpus: '0.5'
+  
   schema-registry:
     image: confluentinc/cp-schema-registry:7.5.0
     container_name: nexus-schema-registry
@@ -621,6 +707,7 @@ services:
     - nexus_network
     volumes:
     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    - ./monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml
     - prometheus_data:/prometheus
     depends_on:
     - kafka-1
@@ -685,6 +772,8 @@ services:
     - --kafka.server=kafka-1:29092
     - --kafka.server=kafka-2:29093
     - --kafka.server=kafka-3:29094
+    - --kafka.server=kafka-4:29095
+    - --kafka.server=kafka-5:29096
     ports:
     - 9308:9308
     networks:
@@ -693,6 +782,8 @@ services:
     - kafka-1
     - kafka-2
     - kafka-3
+    - kafka-4
+    - kafka-5
     healthcheck:
       test:
       - CMD
@@ -748,3 +839,292 @@ services:
         reservations:
           memory: 1.5G
           cpus: '1'
+  
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: nexus-jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: :9411
+      COLLECTOR_OTLP_ENABLED: true
+      METRICS_STORAGE_TYPE: prometheus
+      PROMETHEUS_SERVER_URL: http://prometheus:9090
+    ports:
+    - 5775:5775/udp
+    - 6831:6831/udp
+    - 6832:6832/udp
+    - 5778:5778
+    - 16686:16686
+    - 14250:14250
+    - 14268:14268
+    - 14269:14269
+    - 9411:9411
+    networks:
+    - nexus_network
+    volumes:
+    - jaeger_data:/badger
+    depends_on:
+    - prometheus
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - --quiet
+      - --tries=1
+      - --spider
+      - http://localhost:14269/
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # Apache Superset - BI & Data Visualization
+  superset-postgres:
+    image: postgres:14
+    container_name: nexus-superset-postgres
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset123
+      POSTGRES_DB: superset
+    networks:
+      - nexus_network
+    volumes:
+      - superset_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superset"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+  
+  superset:
+    image: apache/superset:3.0.0
+    container_name: nexus-superset
+    environment:
+      # Database
+      SUPERSET_SECRET_KEY: 'nexus_superset_secret_key_change_in_production_2026'
+      SQLALCHEMY_DATABASE_URI: 'postgresql+psycopg2://superset:superset123@superset-postgres:5432/superset'
+      
+      # Redis (using existing ClickHouse for now, will add Redis if needed)
+      REDIS_HOST: superset-postgres
+      REDIS_PORT: 6379
+      
+      # Superset specific
+      SUPERSET_WEBSERVER_PORT: 8088
+      SUPERSET_LOAD_EXAMPLES: 'no'
+      
+      # Feature flags
+      FEATURE_FLAGS: '{"DASHBOARD_NATIVE_FILTERS": true, "ENABLE_TEMPLATE_PROCESSING": true}'
+      
+      # SMTP (optional - configure if needed)
+      # SMTP_HOST: smtp.gmail.com
+      # SMTP_STARTTLS: 'true'
+      # SMTP_SSL: 'false'
+      # SMTP_USER: your-email@gmail.com
+      # SMTP_PORT: 587
+      # SMTP_PASSWORD: your-app-password
+      # SMTP_MAIL_FROM: superset@nexus.com
+    ports:
+      - "8088:8088"
+    networks:
+      - nexus_network
+    volumes:
+      - superset_data:/app/superset_home
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+    depends_on:
+      - superset-postgres
+      - clickhouse
+      - postgres
+    command: >
+      sh -c "
+      superset db upgrade &&
+      superset fab create-admin --username admin --firstname Admin --lastname User --email admin@nexus.com --password admin123 &&
+      superset init &&
+      /usr/bin/run-server.sh
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
+
+  # =====================================
+  # ELASTICSEARCH + KIBANA (Search & Analytics)
+  # =====================================
+  
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: nexus-elasticsearch
+    environment:
+      # Cluster settings
+      - cluster.name=nexus-cluster
+      - node.name=nexus-es-node
+      - discovery.type=single-node
+      
+      # Security settings (disable for development, enable in production)
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      
+      # Memory settings
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      
+      # Performance tuning
+      - bootstrap.memory_lock=true
+      - indices.query.bool.max_clause_count=4096
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"  # REST API
+      - "9300:9300"  # Node communication
+    networks:
+      - nexus_network
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./elasticsearch/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
+          cpus: '1'
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: nexus-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_NAME=nexus-kibana
+      - SERVER_HOST=0.0.0.0
+      
+      # Disable telemetry
+      - TELEMETRY_ENABLED=false
+      - TELEMETRY_OPTIN=false
+      
+      # Monitoring
+      - MONITORING_UI_CONTAINER_ELASTICSEARCH_ENABLED=true
+    ports:
+      - "5601:5601"
+    networks:
+      - nexus_network
+    volumes:
+      - kibana_data:/usr/share/kibana/data
+      - ./kibana/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    depends_on:
+      - elasticsearch
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  # =====================================
+  # REDIS CACHE (High-performance caching)
+  # =====================================
+  
+  redis:
+    image: redis:7.2-alpine
+    container_name: nexus-redis
+    command: >
+      redis-server
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+      --tcp-backlog 511
+      --timeout 300
+      --tcp-keepalive 300
+    ports:
+      - "6379:6379"
+    networks:
+      - nexus_network
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+          cpus: '1'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+
+  redis-sentinel:
+    image: redis:7.2-alpine
+    container_name: nexus-redis-sentinel
+    command: >
+      redis-sentinel /usr/local/etc/redis/sentinel.conf
+      --sentinel
+    ports:
+      - "26379:26379"
+    networks:
+      - nexus_network
+    volumes:
+      - redis_sentinel_data:/data
+      - ./redis/sentinel.conf:/usr/local/etc/redis/sentinel.conf:ro
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'

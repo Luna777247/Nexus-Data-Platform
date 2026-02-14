@@ -20,7 +20,8 @@ class ArchitectureStabilityChecker:
     """Kiểm tra tính ổn định của kiến trúc"""
     
     def __init__(self):
-        self.workspace = Path("/workspaces/Nexus-Data-Platform")
+        # Auto-detect workspace path
+        self.workspace = Path(__file__).parent.parent.resolve()
         self.results = {
             "timestamp": datetime.now().isoformat(),
             "checks": [],

@@ -1,0 +1,102 @@
+# Kibana Configuration for Nexus Data Platform
+# Version: 8.11.0
+
+# ========================================
+# SERVER
+# ========================================
+server.name: nexus-kibana
+server.host: 0.0.0.0
+server.port: 5601
+
+# Base path (if behind reverse proxy)
+# server.basePath: "/kibana"
+# server.rewriteBasePath: true
+
+# ========================================
+# ELASTICSEARCH
+# ========================================
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+# Security (disabled for development)
+elasticsearch.username: ""
+elasticsearch.password: ""
+elasticsearch.ssl.verificationMode: none
+
+# For production with security enabled:
+# elasticsearch.username: "kibana_system"
+# elasticsearch.password: "your-password"
+# elasticsearch.ssl.certificateAuthorities: [ "/path/to/ca.crt" ]
+
+# ========================================
+# KIBANA INDEX
+# ========================================
+kibana.index: ".kibana"
+
+# ========================================
+# LOGGING
+# ========================================
+logging.root.level: info
+
+logging.appenders.default:
+  type: console
+  layout:
+    type: pattern
+
+# ========================================
+# MONITORING
+# ========================================
+monitoring.ui.container.elasticsearch.enabled: true
+
+# ========================================
+# TELEMETRY
+# ========================================
+telemetry.enabled: false
+telemetry.optIn: false
+
+# ========================================
+# SAVED OBJECTS
+# ========================================
+savedObjects.maxImportPayloadBytes: 26214400
+
+# ========================================
+# MAPS
+# ========================================
+map.includeElasticMapsService: true
+map.tilemap.url: ""
+
+# ========================================
+# SECURITY
+# ========================================
+xpack.security.enabled: false
+xpack.encryptedSavedObjects.encryptionKey: "nexus_kibana_encryption_key_min_32_chars_2026"
+
+# For production, enable security:
+# xpack.security.enabled: true
+# xpack.security.session.idleTimeout: "1h"
+# xpack.security.session.lifespan: "30d"
+
+# ========================================
+# ALERTING
+# ========================================
+xpack.alerting.healthCheck.interval: "60m"
+
+# ========================================
+# CANVAS
+# ========================================
+xpack.canvas.enabled: true
+
+# ========================================
+# FLEET
+# ========================================
+xpack.fleet.enabled: false
+
+# ========================================
+# REPORTING
+# ========================================
+xpack.reporting.enabled: true
+xpack.reporting.kibanaServer.hostname: nexus-kibana
+
+# ========================================
+# DASHBOARD
+# ========================================
+xpack.dashboard_mode.roles: [ "kibana_dashboard_only_user" ]

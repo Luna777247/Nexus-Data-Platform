@@ -3,14 +3,17 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+
 WORKDIR /workspace
 
-COPY apps/api/requirements.txt /workspace/apps/api/requirements.txt
-RUN python -m pip install --no-cache-dir -r /workspace/apps/api/requirements.txt
+COPY apps/api/requirements.txt /workspace/requirements.txt
+RUN python -m pip install --no-cache-dir -r /workspace/requirements.txt
 
-COPY apps/api /workspace/apps/api
-COPY packages/shared /workspace/packages/shared
+# Copy app source (only contents, not folder)
+COPY apps/api/ /workspace/apps/api/
+COPY packages/shared/ /workspace/packages/shared/
 
+# Set working directory to app root
 WORKDIR /workspace/apps/api
 
 EXPOSE 8000

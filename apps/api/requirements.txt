@@ -16,7 +16,8 @@ boto3==1.29.7
 minio==7.2.0
 
 # Message Queue
-kafka-python==2.0.2
+kafka-python==1.4.7
+six>=1.16.0
 
 # Schema Registry & DLQ (HA Features)
 confluent-kafka[avro]==2.3.0
@@ -38,3 +39,8 @@ httpx==0.25.2
 # Development
 python-dotenv==1.0.0
 PyYAML==6.0.1
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.2

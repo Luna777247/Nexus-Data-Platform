@@ -538,7 +538,9 @@ class EndToEndTestSuite:
         
         try:
             # Try to import and test FastAPI app
-            api_path = "/workspaces/Nexus-Data-Platform/apps/api"
+            import os
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            api_path = os.path.join(os.path.dirname(script_dir), "apps", "api")
             sys.path.insert(0, api_path)
             
             try:

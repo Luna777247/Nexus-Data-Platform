@@ -1,0 +1,283 @@
+groups:
+  - name: nexus_platform_alerts
+    interval: 30s
+    rules:
+      # High Priority - Infrastructure Alerts
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 85% (current: {{ $value }}%)"
+          
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: infrastructure
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% (current: {{ $value }}%)"
+          
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100 < 15
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "Disk space is running low"
+          description: "Available disk space is below 15% (current: {{ $value }}%)"
+          
+      # Kafka Alerts
+      - alert: KafkaBrokerDown
+        expr: up{job="kafka"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: kafka
+        annotations:
+          summary: "Kafka broker is down"
+          description: "Kafka broker {{ $labels.instance }} has been down for more than 2 minutes"
+          
+      - alert: KafkaUnderReplicatedPartitions
+        expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: kafka
+        annotations:
+          summary: "Kafka has under-replicated partitions"
+          description: "Kafka broker {{ $labels.instance }} has {{ $value }} under-replicated partitions"
+          
+      - alert: KafkaOfflinePartitions
+        expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: kafka
+        annotations:
+          summary: "Kafka has offline partitions"
+          description: "Kafka cluster has {{ $value }} offline partitions"
+          
+      - alert: KafkaConsumerLag
+        expr: kafka_consumergroup_lag > 10000
+        for: 10m
+        labels:
+          severity: warning
+          component: kafka
+        annotations:
+          summary: "High Kafka consumer lag detected"
+          description: "Consumer group {{ $labels.consumergroup }} has lag of {{ $value }} messages"
+          
+      # Spark Alerts
+      - alert: SparkMasterDown
+        expr: up{job="spark-master"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: spark
+        annotations:
+          summary: "Spark Master is down"
+          description: "Spark Master {{ $labels.instance }} has been down for more than 2 minutes"
+          
+      - alert: SparkWorkerDown
+        expr: up{job="spark-worker"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: spark
+        annotations:
+          summary: "Spark Worker is down"
+          description: "Spark Worker {{ $labels.instance }} has been down for more than 2 minutes"
+          
+      - alert: SparkJobFailureRate
+        expr: rate(spark_job_failed_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: spark
+        annotations:
+          summary: "High Spark job failure rate"
+          description: "Spark job failure rate is {{ $value }} jobs/second"
+          
+      # MinIO Alerts
+      - alert: MinIONodeOffline
+        expr: minio_cluster_nodes_offline_total > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: minio
+        annotations:
+          summary: "MinIO node is offline"
+          description: "MinIO cluster has {{ $value }} offline nodes"
+          
+      - alert: MinIODiskOffline
+        expr: minio_cluster_disk_offline_total > 0
+        for: 2m
+        labels:
+          severity: critical
+          component: minio
+        annotations:
+          summary: "MinIO disk is offline"
+          description: "MinIO cluster has {{ $value }} offline disks"
+          
+      - alert: MinIOHighStorageUsage
+        expr: (minio_bucket_usage_total_bytes / minio_bucket_quota_total_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: minio
+        annotations:
+          summary: "MinIO storage usage is high"
+          description: "MinIO storage usage is above 85% (current: {{ $value }}%)"
+          
+      # PostgreSQL Alerts
+      - alert: PostgreSQLDown
+        expr: up{job="postgres"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: postgres
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL instance {{ $labels.instance }} has been down for more than 2 minutes"
+          
+      - alert: PostgreSQLTooManyConnections
+        expr: sum by (instance) (pg_stat_activity_count) > (pg_settings_max_connections * 0.8)
+        for: 5m
+        labels:
+          severity: warning
+          component: postgres
+        annotations:
+          summary: "PostgreSQL has too many connections"
+          description: "PostgreSQL instance {{ $labels.instance }} is using more than 80% of max connections"
+          
+      - alert: PostgreSQLDeadLocks
+        expr: increase(pg_stat_database_deadlocks[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: postgres
+        annotations:
+          summary: "PostgreSQL deadlocks detected"
+          description: "PostgreSQL database {{ $labels.datname }} has {{ $value }} deadlocks in the last 5 minutes"
+          
+      # ClickHouse Alerts
+      - alert: ClickHouseDown
+        expr: up{job="clickhouse"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: clickhouse
+        annotations:
+          summary: "ClickHouse is down"
+          description: "ClickHouse instance {{ $labels.instance }} has been down for more than 2 minutes"
+          
+      - alert: ClickHouseSlowQueries
+        expr: rate(clickhouse_query_duration_seconds_sum[5m]) / rate(clickhouse_query_duration_seconds_count[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: clickhouse
+        annotations:
+          summary: "ClickHouse queries are slow"
+          description: "Average query duration is {{ $value }} seconds"
+          
+      # API Alerts
+      - alert: HighAPIErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "High API error rate detected"
+          description: "API error rate is above 5% (current: {{ $value | humanizePercentage }})"
+          
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API latency detected"
+          description: "95th percentile API latency is {{ $value }} seconds"
+          
+      - alert: APIDown
+        expr: up{job="api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "API service is down"
+          description: "API instance {{ $labels.instance }} has been down for more than 2 minutes"
+          
+      # Data Quality Alerts
+      - alert: DataQualityCheckFailed
+        expr: data_quality_check_status == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: data-quality
+        annotations:
+          summary: "Data quality check failed"
+          description: "Data quality check {{ $labels.check_name }} has failed"
+          
+      - alert: HighNullRate
+        expr: data_quality_null_percentage > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: data-quality
+        annotations:
+          summary: "High null value rate detected"
+          description: "Field {{ $labels.field_name }} has {{ $value }}% null values"
+          
+      # Airflow Alerts
+      - alert: AirflowSchedulerDown
+        expr: up{job="airflow-scheduler"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: airflow
+        annotations:
+          summary: "Airflow Scheduler is down"
+          description: "Airflow Scheduler has been down for more than 2 minutes"
+          
+      - alert: AirflowDAGFailures
+        expr: rate(airflow_dag_run_failed_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: airflow
+        annotations:
+          summary: "Airflow DAG failures detected"
+          description: "DAG {{ $labels.dag_id }} has {{ $value }} failures per second"
+          
+      # Distributed Tracing Alerts
+      - alert: JaegerCollectorDown
+        expr: up{job="jaeger"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: tracing
+        annotations:
+          summary: "Jaeger Collector is down"
+          description: "Jaeger Collector has been down for more than 2 minutes"
+          
+      - alert: HighTraceSamplingDropRate
+        expr: rate(jaeger_collector_traces_dropped_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: tracing
+        annotations:
+          summary: "High trace drop rate in Jaeger"
+          description: "Jaeger is dropping {{ $value }} traces per second"

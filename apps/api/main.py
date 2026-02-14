@@ -12,7 +12,7 @@ if os.path.exists(env_local_path):
     load_dotenv(env_local_path)
     print(f"✅ Loaded environment from {env_local_path}")
 
-from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
@@ -27,6 +27,18 @@ import logging
 from datetime import datetime
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
+
+# RBAC imports
+from auth import (
+    login_for_access_token, 
+    LoginRequest, 
+    Token,
+    get_current_active_user,
+    require_permissions,
+    require_roles,
+    log_audit_event
+)
+from rbac import User, Permission, Role
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -406,6 +418,52 @@ async def get_metrics():
         "cached_at": datetime.now().isoformat()
     }
     
+    # Cache for 5 minutes
+    set_to_cache(cache_key, metrics, ttl=300)
+    return metrics
+
+# ============================================
+# AUTHENTICATION ENDPOINTS
+# ============================================
+
+@app.post("/api/v1/auth/login", response_model=Token, tags=["Authentication"])
+async def login(login_data: LoginRequest):
+    """
+    User login - Returns JWT access token
+    
+    **Demo Credentials:**
+    - admin / password123
+    - engineer / password123
+    - scientist / password123
+    - analyst / password123
+    - viewer / password123
+    - api_client / password123
+    """
+    return await login_for_access_token(login_data)
+
+
+@app.get("/api/v1/auth/me", tags=["Authentication"])
+async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
+    """Get current authenticated user information"""
+    return {
+        "username": current_user.username,
+        "email": current_user.email,
+        "roles": [role.value for role in current_user.roles],
+        "permissions": [perm.value for perm in current_user.get_permissions()],
+        "active": current_user.active
+    }
+
+
+@app.get("/api/v1/auth/permissions", tags=["Authentication"])
+async def get_user_permissions(current_user: User = Depends(get_current_active_user)):
+    """Get permissions for current user"""
+    permissions = current_user.get_permissions()
+    return {
+        "username": current_user.username,
+        "roles": [role.value for role in current_user.roles],
+        "permissions": sorted([perm.value for perm in permissions])
+    }
+    
     # Cache for 1 hour
     set_to_cache(cache_key, metrics, ttl=3600)
     
@@ -426,7 +484,12 @@ async def list_data_sources(enabled: Optional[bool] = None):
 
 
 @app.post("/api/v1/data-sources", tags=["Data Sources"])
-async def create_data_source(payload: DataSourceCreate):
+async def create_data_source(
+    payload: DataSourceCreate,
+    current_user: User = Depends(require_permissions(Permission.MANAGE_PIPELINES))
+):
+    """Create new data source - Requires DATA_ENGINEER or ADMIN role"""
+    log_audit_event(current_user, "CREATE", f"data_source:{payload.source_id}")
     source = _normalize_source_payload(payload.model_dump(exclude_none=True))
     insert_sql = """
         INSERT INTO data_sources (source_id, source_name, source_type, enabled, config)
@@ -469,7 +532,12 @@ async def get_global_config():
 
 
 @app.put("/api/v1/data-sources/global", tags=["Data Sources"])
-async def update_global_config(payload: GlobalConfigUpdate):
+async def update_global_config(
+    payload: GlobalConfigUpdate,
+    current_user: User = Depends(require_roles(Role.ADMIN, Role.DATA_ENGINEER))
+):
+    """Update global config - Requires ADMIN or DATA_ENGINEER role"""
+    log_audit_event(current_user, "UPDATE", "global_config")
     update_data = payload.model_dump(exclude_none=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No update fields provided")
@@ -804,14 +872,20 @@ async def get_recommendations(
 # ============================================
 
 @app.post("/api/v1/events", tags=["Events"])
-async def create_event(event_data: dict, background_tasks: BackgroundTasks):
+async def create_event(
+    event_data: dict,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_permissions(Permission.INGEST_DATA))
+):
     """
     Record user event (view, booking, review, etc.)
     
     Events are sent to Kafka queue for real-time processing
+    Requires INGEST_DATA permission
     """
     
-    logger.info(f"Recording event: {event_data}")
+    log_audit_event(current_user, "INGEST", f"event:{event_data.get('type', 'unknown')}")
+    logger.info(f"Recording event from user {current_user.username}: {event_data}")
     
     new_event = {
         'id': f"e_{len(SAMPLE_EVENTS) + 1}",
@@ -864,16 +938,17 @@ async def create_event(event_data: dict, background_tasks: BackgroundTasks):
 # ============================================
 
 @app.post("/api/v1/cache/clear", tags=["Admin"])
-async def clear_cache():
-    """Clear all cached data"""
+async def clear_cache(current_user: User = Depends(require_roles(Role.ADMIN))):
+    """Clear all cached data - Requires ADMIN role"""
+    log_audit_event(current_user, "CLEAR", "cache")
     if cache:
         cache.flushall()
         return {'status': 'success', 'message': 'Cache cleared'}
     return {'status': 'error', 'message': 'Cache not available'}
 
 @app.get("/api/v1/cache/stats", tags=["Admin"])
-async def cache_stats():
-    """Get cache statistics"""
+async def cache_stats(current_user: User = Depends(require_permissions(Permission.VIEW_METRICS))):
+    """Get cache statistics - Requires VIEW_METRICS permission"""
     if cache:
         info = cache.info()
         return {
