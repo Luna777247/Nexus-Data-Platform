@@ -12,7 +12,7 @@ from typing import Optional, List
 import os
 from pydantic import BaseModel
 
-from rbac import User, Permission, Role, DEMO_USERS
+from apps.api.rbac import User, Permission, Role, DEMO_USERS
 
 
 # ============================================

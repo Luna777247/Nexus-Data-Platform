@@ -12,13 +12,13 @@
 # Build backend (api) và frontend (ui) từ thư mục gốc project
 cd d:\Nexus-Data-Platform
 # Build backend (api)
-docker build -t nexus-api -f apps/api/Dockerfile .
+docker build -t nexus-api -f apps/api/Dockerfile apps/api
 # Build frontend (ui)
 cd apps/ui
 npm install react-is
 
 cd d:\Nexus-Data-Platform
-docker build -t nexus-ui -f apps/ui/Dockerfile .
+docker build -t nexus-ui -f apps/ui/Dockerfile apps/ui
 ```
 
 ## 3. Chạy toàn bộ hệ thống

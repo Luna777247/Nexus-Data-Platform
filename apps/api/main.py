@@ -1,3 +1,541 @@
+
+# --- SETTINGS CRUD BEGIN (PostgreSQL + RBAC) ---
+from fastapi import Depends, HTTPException, FastAPI
+app = FastAPI()
+from pydantic import BaseModel
+from typing import List, Optional
+from apps.api.auth import get_current_user
+from apps.api.rbac import Permission
+
+class SettingModel(BaseModel):
+    key: str
+    value: str
+    description: Optional[str] = None
+
+def _setting_row_to_entry(row):
+    return SettingModel(
+        key=row[0],
+        value=row[1],
+        description=row[2]
+    )
+
+# Create setting (require: can_create_setting)
+@app.post("/api/v1/settings", response_model=SettingModel, tags=["Settings"])
+def create_setting(setting: SettingModel, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.CREATE_SETTING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO settings (key, value, description)
+                    VALUES (%s, %s, %s)
+                    RETURNING key, value, description
+                    """,
+                    (setting.key, setting.value, setting.description)
+                )
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            row = cur.fetchone()
+            conn.commit()
+            return _setting_row_to_entry(row)
+
+# Read all settings (require: can_read_setting)
+@app.get("/api/v1/settings", response_model=List[SettingModel], tags=["Settings"])
+def get_settings(user=Depends(get_current_user)):
+    if not user.has_permission(Permission.READ_SETTING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value, description FROM settings ORDER BY key")
+            rows = cur.fetchall()
+            return [_setting_row_to_entry(row) for row in rows]
+
+# Read single setting (require: can_read_setting)
+@app.get("/api/v1/settings/{key}", response_model=SettingModel, tags=["Settings"])
+def get_setting(key: str, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.READ_SETTING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value, description FROM settings WHERE key = %s", (key,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Setting not found")
+            return _setting_row_to_entry(row)
+
+# Update setting (require: can_update_setting)
+@app.put("/api/v1/settings/{key}", response_model=SettingModel, tags=["Settings"])
+def update_setting(key: str, setting: SettingModel, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.UPDATE_SETTING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE settings SET value=%s, description=%s
+                WHERE key=%s RETURNING key, value, description
+                """,
+                (setting.value, setting.description, key)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Setting not found")
+            conn.commit()
+            return _setting_row_to_entry(row)
+
+# Delete setting (require: can_delete_setting)
+@app.delete("/api/v1/settings/{key}", tags=["Settings"])
+def delete_setting(key: str, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.DELETE_SETTING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM settings WHERE key = %s RETURNING key", (key,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Setting not found")
+            conn.commit()
+            return {"detail": "Deleted"}
+# --- SETTINGS CRUD END ---
+
+# --- USER MANAGEMENT CRUD BEGIN (PostgreSQL + RBAC) ---
+from fastapi import Depends
+from apps.api.auth import get_current_user
+from apps.api.rbac import Permission
+
+class UserModel(BaseModel):
+    id: int
+    username: str
+    email: str
+    full_name: Optional[str] = None
+    is_active: bool = True
+    role: Optional[str] = "user"
+
+def _user_row_to_entry(row):
+    return UserModel(
+        id=row[0],
+        username=row[1],
+        email=row[2],
+        full_name=row[3],
+        is_active=row[4],
+        role=row[5]
+    )
+
+# Create user (require: can_create_user)
+@app.post("/api/v1/users", response_model=UserModel, tags=["User Management"])
+def create_user(user: UserModel, current=Depends(get_current_user)):
+    if not current.has_permission(Permission.CREATE_USER):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO users (username, email, full_name, is_active, role)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id, username, email, full_name, is_active, role
+                    """,
+                    (user.username, user.email, user.full_name, user.is_active, user.role)
+                )
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            row = cur.fetchone()
+            conn.commit()
+            return _user_row_to_entry(row)
+
+# Read all users (require: can_read_user)
+@app.get("/api/v1/users", response_model=List[UserModel], tags=["User Management"])
+def get_users(role: Optional[str] = None, is_active: Optional[bool] = None, current=Depends(get_current_user)):
+    if not current.has_permission(Permission.READ_USER):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            query = "SELECT id, username, email, full_name, is_active, role FROM users"
+            params = []
+            filters = []
+            if role:
+                filters.append("role = %s")
+                params.append(role)
+            if is_active is not None:
+                filters.append("is_active = %s")
+                params.append(is_active)
+            if filters:
+                query += " WHERE " + " AND ".join(filters)
+            query += " ORDER BY id"
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            return [_user_row_to_entry(row) for row in rows]
+
+# Read single user (require: can_read_user)
+@app.get("/api/v1/users/{user_id}", response_model=UserModel, tags=["User Management"])
+def get_user(user_id: int, current=Depends(get_current_user)):
+    if not current.has_permission(Permission.READ_USER):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, username, email, full_name, is_active, role FROM users WHERE id = %s", (user_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+            return _user_row_to_entry(row)
+
+# Update user (require: can_update_user)
+@app.put("/api/v1/users/{user_id}", response_model=UserModel, tags=["User Management"])
+def update_user(user_id: int, user: UserModel, current=Depends(get_current_user)):
+    if not current.has_permission(Permission.UPDATE_USER):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE users SET username=%s, email=%s, full_name=%s, is_active=%s, role=%s
+                WHERE id=%s RETURNING id, username, email, full_name, is_active, role
+                """,
+                (user.username, user.email, user.full_name, user.is_active, user.role, user_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+            conn.commit()
+            return _user_row_to_entry(row)
+
+# Delete user (require: can_delete_user)
+@app.delete("/api/v1/users/{user_id}", tags=["User Management"])
+def delete_user(user_id: int, current=Depends(get_current_user)):
+    if not current.has_permission(Permission.DELETE_USER):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM users WHERE id = %s RETURNING id", (user_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+            conn.commit()
+            return {"detail": "Deleted"}
+# --- USER MANAGEMENT CRUD END ---
+
+# --- QUALITY LINEAGE CRUD BEGIN (PostgreSQL + RBAC) ---
+from fastapi import Depends
+from apps.api.auth import get_current_user
+from apps.api.rbac import Permission
+
+class LineageNodeModel(BaseModel):
+    id: int
+    name: str
+    type: str
+    is_warning: Optional[bool] = False
+    parent_id: Optional[int] = None
+
+def _lineage_row_to_entry(row):
+    return LineageNodeModel(
+        id=row[0],
+        name=row[1],
+        type=row[2],
+        is_warning=row[3],
+        parent_id=row[4]
+    )
+
+# Create node (require: can_create_lineage)
+@app.post("/api/v1/lineage", response_model=LineageNodeModel, tags=["Quality Lineage"])
+def create_lineage_node(node: LineageNodeModel, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.CREATE_LINEAGE):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO lineage_nodes (name, type, is_warning, parent_id)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id, name, type, is_warning, parent_id
+                """,
+                (node.name, node.type, node.is_warning, node.parent_id)
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return _lineage_row_to_entry(row)
+
+# Read all nodes (require: can_read_lineage)
+@app.get("/api/v1/lineage", response_model=List[LineageNodeModel], tags=["Quality Lineage"])
+def get_lineage_nodes(type: Optional[str] = None, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.READ_LINEAGE):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            query = "SELECT id, name, type, is_warning, parent_id FROM lineage_nodes"
+            params = []
+            if type:
+                query += " WHERE type = %s"
+                params.append(type)
+            query += " ORDER BY id"
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            return [_lineage_row_to_entry(row) for row in rows]
+
+# Read single node (require: can_read_lineage)
+@app.get("/api/v1/lineage/{node_id}", response_model=LineageNodeModel, tags=["Quality Lineage"])
+def get_lineage_node(node_id: int, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.READ_LINEAGE):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, type, is_warning, parent_id FROM lineage_nodes WHERE id = %s", (node_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Node not found")
+            return _lineage_row_to_entry(row)
+
+# Update node (require: can_update_lineage)
+@app.put("/api/v1/lineage/{node_id}", response_model=LineageNodeModel, tags=["Quality Lineage"])
+def update_lineage_node(node_id: int, node: LineageNodeModel, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.UPDATE_LINEAGE):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE lineage_nodes SET name=%s, type=%s, is_warning=%s, parent_id=%s
+                WHERE id=%s RETURNING id, name, type, is_warning, parent_id
+                """,
+                (node.name, node.type, node.is_warning, node.parent_id, node_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Node not found")
+            conn.commit()
+            return _lineage_row_to_entry(row)
+
+# Delete node (require: can_delete_lineage)
+@app.delete("/api/v1/lineage/{node_id}", tags=["Quality Lineage"])
+def delete_lineage_node(node_id: int, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.DELETE_LINEAGE):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM lineage_nodes WHERE id = %s RETURNING id", (node_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Node not found")
+            conn.commit()
+            return {"detail": "Deleted"}
+# --- QUALITY LINEAGE CRUD END ---
+
+# --- MONITORING CRUD BEGIN (PostgreSQL + RBAC) ---
+from fastapi import Depends
+from apps.api.auth import get_current_user
+from apps.api.rbac import Permission
+
+class MonitoringMetric(BaseModel):
+    id: int
+    name: str
+    value: float
+    timestamp: str  # ISO timestamp
+
+def _metric_row_to_entry(row):
+    return MonitoringMetric(
+        id=row[0],
+        name=row[1],
+        value=row[2],
+        timestamp=row[3].isoformat() if row[3] else None,
+    )
+
+# Create metric (require: can_create_metric)
+@app.post("/api/v1/monitoring", response_model=MonitoringMetric, tags=["Monitoring"])
+def create_metric(metric: MonitoringMetric, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.CREATE_MONITORING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO monitoring_metrics (name, value, timestamp)
+                VALUES (%s, %s, %s)
+                RETURNING id, name, value, timestamp
+                """,
+                (metric.name, metric.value, metric.timestamp)
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return _metric_row_to_entry(row)
+
+# Read all metrics (require: can_read_metric)
+@app.get("/api/v1/monitoring", response_model=List[MonitoringMetric], tags=["Monitoring"])
+def get_metrics(name: Optional[str] = None, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.READ_MONITORING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            query = "SELECT id, name, value, timestamp FROM monitoring_metrics"
+            params = []
+            if name:
+                query += " WHERE name = %s"
+                params.append(name)
+            query += " ORDER BY timestamp DESC"
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            return [_metric_row_to_entry(row) for row in rows]
+
+# Read single metric (require: can_read_metric)
+@app.get("/api/v1/monitoring/{metric_id}", response_model=MonitoringMetric, tags=["Monitoring"])
+def get_metric(metric_id: int, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.READ_MONITORING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, value, timestamp FROM monitoring_metrics WHERE id = %s", (metric_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Metric not found")
+            return _metric_row_to_entry(row)
+
+# Update metric (require: can_update_metric)
+@app.put("/api/v1/monitoring/{metric_id}", response_model=MonitoringMetric, tags=["Monitoring"])
+def update_metric(metric_id: int, metric: MonitoringMetric, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.UPDATE_MONITORING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE monitoring_metrics SET name=%s, value=%s, timestamp=%s
+                WHERE id=%s RETURNING id, name, value, timestamp
+                """,
+                (metric.name, metric.value, metric.timestamp, metric_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Metric not found")
+            conn.commit()
+            return _metric_row_to_entry(row)
+
+# Delete metric (require: can_delete_metric)
+@app.delete("/api/v1/monitoring/{metric_id}", tags=["Monitoring"])
+def delete_metric(metric_id: int, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.DELETE_MONITORING):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM monitoring_metrics WHERE id = %s RETURNING id", (metric_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Metric not found")
+            conn.commit()
+            return {"detail": "Deleted"}
+# --- MONITORING CRUD END ---
+
+# --- LOG SEARCH CRUD BEGIN (PostgreSQL + RBAC) ---
+from typing import List, Optional
+from pydantic import BaseModel
+from fastapi import HTTPException, Depends
+from apps.api.auth import get_current_user
+from apps.api.rbac import Permission
+
+class LogEntry(BaseModel):
+    id: int
+    ts: str  # ISO timestamp
+    level: str
+    service: str
+    msg: str
+
+def _log_row_to_entry(row):
+    return LogEntry(
+        id=row[0],
+        ts=row[1].isoformat() if row[1] else None,
+        level=row[2],
+        service=row[3],
+        msg=row[4],
+    )
+
+# Create log (require: can_create_log)
+@app.post("/api/v1/logs", response_model=LogEntry, tags=["Log Search"])
+def create_log(log: LogEntry, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.CREATE_LOG):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO logs (ts, level, service, msg)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id, ts, level, service, msg
+                """,
+                (log.ts, log.level, log.service, log.msg)
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return _log_row_to_entry(row)
+
+# Read all logs (require: can_read_log)
+@app.get("/api/v1/logs", response_model=List[LogEntry], tags=["Log Search"])
+def get_logs(level: Optional[str] = None, service: Optional[str] = None, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.READ_LOG):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            query = "SELECT id, ts, level, service, msg FROM logs"
+            params = []
+            filters = []
+            if level:
+                filters.append("level = %s")
+                params.append(level)
+            if service:
+                filters.append("service = %s")
+                params.append(service)
+            if filters:
+                query += " WHERE " + " AND ".join(filters)
+            query += " ORDER BY ts DESC"
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            return [_log_row_to_entry(row) for row in rows]
+
+# Read single log (require: can_read_log)
+@app.get("/api/v1/logs/{log_id}", response_model=LogEntry, tags=["Log Search"])
+def get_log(log_id: int, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.READ_LOG):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, ts, level, service, msg FROM logs WHERE id = %s", (log_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Log not found")
+            return _log_row_to_entry(row)
+
+# Update log (require: can_update_log)
+@app.put("/api/v1/logs/{log_id}", response_model=LogEntry, tags=["Log Search"])
+def update_log(log_id: int, log: LogEntry, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.UPDATE_LOG):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE logs SET ts=%s, level=%s, service=%s, msg=%s
+                WHERE id=%s RETURNING id, ts, level, service, msg
+                """,
+                (log.ts, log.level, log.service, log.msg, log_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Log not found")
+            conn.commit()
+            return _log_row_to_entry(row)
+
+# Delete log (require: can_delete_log)
+@app.delete("/api/v1/logs/{log_id}", tags=["Log Search"])
+def delete_log(log_id: int, user=Depends(get_current_user)):
+    if not user.has_permission(Permission.DELETE_LOG):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    with _get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM logs WHERE id = %s RETURNING id", (log_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Log not found")
+            conn.commit()
+            return {"detail": "Deleted"}
+# --- LOG SEARCH CRUD END ---
 """
 Nexus Data Platform - FastAPI Endpoints
 REST & GraphQL API for tourism data serving

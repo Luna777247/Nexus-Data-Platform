@@ -1,0 +1,34 @@
+/* Nexus Data Platform Custom Theme */
+body {
+  background-color: #fff !important;
+  color: #1e3a8a !important; /* blue-900 */
+}
+
+.text-primary {
+  color: #1e3a8a !important;
+}
+.bg-primary {
+  background-color: #fff !important;
+}
+
+a, .link, .nav-link {
+  color: #1e3a8a !important;
+}
+
+/* Override Tailwind blue for buttons, etc. */
+button, .btn, .bg-blue-600 {
+  background-color: #1e3a8a !important;
+  color: #fff !important;
+}
+
+/* Sidebar and header tweaks */
+.sidebar, .header {
+  background: #fff !important;
+  color: #1e3a8a !important;
+}
+
+/* Remove dark mode if any */
+.dark, .dark * {
+  background: #fff !important;
+  color: #1e3a8a !important;
+}

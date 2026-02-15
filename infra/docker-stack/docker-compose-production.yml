@@ -24,109 +24,7 @@ volumes:
   superset_postgres_data: null
   elasticsearch_data: null
   kibana_data: null
-  redis_data: null
-  redis_sentinel_data: null
-services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
-    container_name: nexus-zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-    - 2181:2181
-    networks:
-    - nexus_network
-    volumes:
-    - zookeeper_data:/var/lib/zookeeper/data
-    healthcheck:
-      test: echo stat | nc localhost 2181
-      interval: 10s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 1.5G
-          cpus: '1'
-        reservations:
-          memory: 1G
-          cpus: '0.5'
-  kafka-1:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: nexus-kafka-1
-    depends_on:
-    - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-      KAFKA_JMX_PORT: 9101
-      KAFKA_JMX_HOSTNAME: kafka-1
-    ports:
-    - 9092:9092
-    - 9101:9101
-    networks:
-    - nexus_network
-    volumes:
-    - kafka_1_data:/var/lib/kafka/data
-    healthcheck:
-      test: kafka-broker-api-versions --bootstrap-server localhost:9092
-      interval: 10s
-      timeout: 10s
-      retries: 5
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 1.5G
-          cpus: '0.5'
-  kafka-2:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: nexus-kafka-2
-    depends_on:
-    - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:29093,PLAINTEXT_HOST://localhost:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
-      KAFKA_MIN_INSYNC_REPLICAS: 2
-      KAFKA_JMX_PORT: 9102
-      KAFKA_JMX_HOSTNAME: kafka-2
-    ports:
-    - 9093:9093
-    - 9102:9102
-    networks:
-    - nexus_network
-    volumes:
-    - kafka_2_data:/var/lib/kafka/data
-    healthcheck:
-      test: kafka-broker-api-versions --bootstrap-server localhost:9093
-      interval: 10s
-      timeout: 10s
-      retries: 5
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1'
-        reservations:
-          memory: 1.5G
-          cpus: '0.5'
+
   kafka-3:
     image: confluentinc/cp-kafka:7.5.0
     container_name: nexus-kafka-3
@@ -1120,6 +1018,30 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  # ============================================
+  # API BACKEND - FastAPI
+  # ============================================
+  api:
+    image: nexus-api
+    container_name: nexus-api
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    networks:
+      - nexus_network
+    environment:
+      - ENV_FILE=.env
+      - PYTHONPATH=/workspace/apps
+    volumes:
+      - ../../apps/api:/workspace
+    depends_on:
+      - postgres-iceberg
+      - redis
+      - kafka-3
+    restart: always
+    
     deploy:
       resources:
         limits:
